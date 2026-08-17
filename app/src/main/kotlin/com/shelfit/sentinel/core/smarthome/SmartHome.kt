@@ -227,8 +227,8 @@ data class DeviceCommandReport(
 }
 
 fun SmartHomeFailure.Kind.describe(): String = when (this) {
-    SmartHomeFailure.Kind.NOT_CONFIGURED -> "smart home not set up in this build"
-    SmartHomeFailure.Kind.NOT_CONNECTED -> "Google Home not connected"
+    SmartHomeFailure.Kind.NOT_CONFIGURED -> "no smart home set up"
+    SmartHomeFailure.Kind.NOT_CONNECTED -> "smart home not connected"
     SmartHomeFailure.Kind.PERMISSION_DENIED -> "permission withdrawn"
     SmartHomeFailure.Kind.NETWORK_UNAVAILABLE -> "no network"
     SmartHomeFailure.Kind.HOME_UNAVAILABLE -> "home unavailable"

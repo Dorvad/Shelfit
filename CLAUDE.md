@@ -235,16 +235,28 @@ types, and it is enforced by `PipelineBoundaryTest`.
 | `SmartHomeDirectory` | `core/smarthome/` | The chosen home's device list, shared by the connect screen and the rule editor |
 | `SmartHomeDeviceAction` | `core/action/Action.kt` | Device ids plus a verb. No provider type, no network |
 | `SmartHomeActionExecutor` | `core/action/` | Turns the action into commands. In `core/` because it needs no Android |
+| `TuyaCloudClient` | `platform/smarthome/tuya/` | **The working provider.** Tuya Cloud API over `HttpsURLConnection` |
+| `TuyaCloudApi` / `TuyaSignature` | `platform/smarthome/tuya/` | Signed HTTP and the HMAC-SHA256 signing, which is pure and unit-tested |
 | `GoogleHomeClient` | `platform/smarthome/` | Where the Home APIs SDK goes. **Currently reports `NotConfigured`** |
-| `SimulatedSmartHomeClient` | `platform/smarthome/` | A pretend home for development. Off by default |
-| `SelectableSmartHomeClient` | `platform/smarthome/` | Routes to whichever the developer setting names |
+| `SimulatedSmartHomeClient` | `platform/smarthome/` | A pretend home for development |
+| `SelectableSmartHomeClient` | `platform/smarthome/` | Routes to the provider named by `SmartHomeProvider` |
+
+**Tuya is the provider that works.** It needs no hub and no SDK: three REST endpoints over
+`HttpsURLConnection`, signed with `javax.crypto`, and `org.json` for parsing — all of it already
+in the platform, so the integration added **zero dependencies**. Tuya's own app SDK
+(`com.thingclips.smart:thingsmart`) was rejected deliberately: it brings fastjson, okhttp, native
+libraries for two ABIs and an embedded V8 engine into an app whose premise is running quietly for
+weeks. See `docs/tuya-setup.md`.
+
+`TuyaSignature` is pure Kotlin and heavily tested, because a signing bug arrives as a generic
+authorisation error indistinguishable from a mistyped secret. **Do not "simplify" it** — the blank
+Signature-Headers line, the uppercase hex and the sorted query string are all load-bearing.
 
 **The Google Home APIs Android SDK is not in this repository and did not resolve from
-Google's Maven or Maven Central.** `GoogleHomeClient` is therefore deliberately empty, with
-`TODO(home-sdk)` on each member describing what it must produce. Do not fill it in with
-guessed coordinates, classes or method names — check Google's own current documentation and
-implement against what is actually there. Everything on this side of the seam is finished
-and tested without it.
+Google's Maven or Maven Central** — it is a ZIP behind a signed-in developer account, and the
+Home APIs additionally require a Nest hub. `GoogleHomeClient` is therefore deliberately empty,
+with `TODO(home-sdk)` on each member describing what it must produce. Do not fill it in with
+guessed coordinates, classes or method names. See `docs/google-home-setup.md`.
 
 Rules a provider implementation must keep:
 
@@ -323,6 +335,10 @@ Dependencies are deliberately few: Compose + Material 3, Navigation Compose,
 Lifecycle, DataStore Preferences, coroutines. Prefer a local vector drawable or a
 few lines of Kotlin over a new dependency.
 
+The smart-home integration is the worked example: HTTP is `HttpsURLConnection`, JSON is
+`org.json`, signing is `javax.crypto` — all already in the platform. A vendor app SDK was
+available and was turned down for what it would have cost in size, native libraries and battery.
+
 ## Build and test commands
 
 `ANDROID_HOME` must be set, or `sdk.dir` present in `local.properties`.
@@ -398,16 +414,14 @@ bugs, and the health screen exists to make each one a single tap:
 
 ## Current state
 
-Stage 6. The trigger → rule → action pipeline is complete and user-editable, Sensor Mode runs
-double clap detection in a foreground service so the screen can be off, and the smart-home
-action exists end to end **except for the provider itself**.
+Stage 6, complete. Clap twice and a real light switches: the pipeline runs from microphone to
+smart-home device, in a foreground service, with the screen off.
 
-Four actions: vibrate, show a notification, write to the log — all entirely local — and
-switch smart-home devices. The last one is fully built and tested against
-`SmartHomeClient`; what is missing is a `SmartHomeClient` that talks to Google, because the
-SDK is not obtainable from this repository. Turn on the simulated home in
-Settings → Smart home to exercise the flow. Camera, gesture, light and movement triggers
-remain later stages with extension points and no implementations.
+Four actions: vibrate, show a notification, write to the log — all entirely local — and switch
+smart-home devices. Three providers sit behind `SmartHomeClient`: **Tuya works**, Google reports
+`NotConfigured` until its SDK is available, and a simulator covers every failure path without
+hardware. Camera, gesture, light and movement triggers remain later stages with extension points
+and no implementations.
 
 Screens: dashboard, settings, `ui/rules` — the rule editor, including the device picker —
 `ui/smarthome` — connect, choose a home, see what can be switched — `ui/health` — setup and
@@ -434,11 +448,15 @@ making deliberately, not by accident.
 works. Calibration reports this as poor headroom, or fails outright with advice,
 rather than shipping a configuration that cannot succeed.
 
-**Known limitation.** No real smart home can be reached. `GoogleHomeClient` reports
-`NotConfigured`, so a smart-home automation is saveable and reports honestly but switches
-nothing until the Home APIs SDK is added and that class implemented. The user-facing text says
-so rather than failing mysteriously. See `docs/google-home-setup.md` for the manual account
-and project work that has to happen first.
+**Known limitation.** Tuya's IoT Core connection service is a one-month free trial, extendable
+free on request. When it lapses the API stops answering and automations stop switching — the app
+reports it, but it has still stopped. This is the strongest argument for adding local LAN control,
+which would also remove the cloud round trip. Local control needs a per-device key that only the
+cloud API supplies, so the cloud setup is a prerequisite either way.
+
+**Known limitation.** Google Home cannot be reached at all. `GoogleHomeClient` reports
+`NotConfigured`; the SDK is not obtainable from this repository and the Home APIs need a Nest hub.
+The user-facing text says so rather than failing mysteriously.
 
 Do not build ahead of the current stage. Extension points, yes; speculative
 features, no.

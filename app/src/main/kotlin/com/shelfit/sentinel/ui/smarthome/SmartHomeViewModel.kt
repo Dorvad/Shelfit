@@ -11,10 +11,13 @@ import com.shelfit.sentinel.core.smarthome.SmartHomeDevice
 import com.shelfit.sentinel.core.smarthome.SmartHomeDeviceList
 import com.shelfit.sentinel.core.smarthome.SmartHomeFailure
 import com.shelfit.sentinel.core.smarthome.SmartHomeState
+import com.shelfit.sentinel.core.smarthome.SmartHomeProvider
 import com.shelfit.sentinel.core.smarthome.SmartHomeStructure
 import com.shelfit.sentinel.core.smarthome.StructureId
 import com.shelfit.sentinel.core.smarthome.describe
 import com.shelfit.sentinel.platform.smarthome.SimulatedSmartHomeClient
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCredentials
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaRegion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,7 +52,10 @@ data class SmartHomeUiState(
     val devices: List<DeviceRowUi> = emptyList(),
     val loadingDevices: Boolean = false,
     val deviceProblem: String? = null,
-    val simulatorEnabled: Boolean = false,
+    val provider: SmartHomeProvider = SmartHomeProvider.Default,
+    /** True once keys are saved. The secret itself is never sent back to the screen. */
+    val tuyaConfigured: Boolean = false,
+    val tuyaRegion: TuyaRegion = TuyaRegion.Default,
     val simulatorFault: SimulatedSmartHomeClient.Fault = SimulatedSmartHomeClient.Fault.NONE,
 )
 
@@ -86,7 +92,9 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
             devices = deviceList.devices.map(::toRow),
             loadingDevices = deviceList.loading,
             deviceProblem = deviceList.problem(),
-            simulatorEnabled = settings.simulatedSmartHome,
+            provider = settings.smartHomeProvider,
+            tuyaConfigured = settings.tuya.complete,
+            tuyaRegion = settings.tuya.region,
             simulatorFault = fault,
         )
     }.stateIn(
@@ -130,9 +138,34 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
 
     fun reloadDevices() = container.smartHomeDirectory.reload()
 
-    fun setSimulatorEnabled(enabled: Boolean) {
+    /**
+     * Changes provider.
+     *
+     * Disconnects first: leaving the previous provider linked while a different one is in use
+     * would keep a token alive for an account the user has stopped pointing at.
+     */
+    fun setProvider(provider: SmartHomeProvider) {
         viewModelScope.launch {
-            container.settingsRepository.setSimulatedSmartHome(enabled)
+            client.disconnect()
+            container.settingsRepository.setSmartHomeProvider(provider)
+        }
+    }
+
+    fun saveTuyaCredentials(accessId: String, accessSecret: String, region: TuyaRegion) {
+        viewModelScope.launch {
+            container.settingsRepository.saveTuyaCredentials(
+                TuyaCredentials(accessId = accessId, accessSecret = accessSecret, region = region),
+            )
+            // Connect straight away: the user has just pasted keys and wants to know whether
+            // they work, not to hunt for a second button.
+            client.connect()
+        }
+    }
+
+    fun clearTuyaCredentials() {
+        viewModelScope.launch {
+            client.disconnect()
+            container.settingsRepository.clearTuyaCredentials()
         }
     }
 
@@ -178,16 +211,16 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
 
         private fun SmartHomeState.detail(): String = when (this) {
             SmartHomeState.NotConfigured ->
-                "This build does not include the Google Home SDK, so it cannot reach your " +
-                    "devices. Everything else about smart-home automations works — you can " +
-                    "try the flow with the simulator below."
+                "Choose a smart home below. Until then, automations can only do things on " +
+                    "this phone."
 
             SmartHomeState.NotConnected ->
-                "Connect your Google account to let this app switch your lights and plugs."
+                "Not linked yet. Connect to let automations switch your lights and plugs."
 
             SmartHomeState.PermissionRequired ->
-                "Access was withdrawn. Automations pointing at your devices will not run " +
-                    "until you connect again."
+                "Access was refused. Automations pointing at your devices will not run " +
+                    "until you connect again — check your keys, and that the app account is " +
+                    "still linked to your cloud project."
 
             is SmartHomeState.Connected -> when (structures.size) {
                 0 -> "Connected, but no homes were returned for this account."

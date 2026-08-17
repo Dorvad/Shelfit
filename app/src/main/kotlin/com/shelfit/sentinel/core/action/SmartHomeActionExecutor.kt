@@ -52,13 +52,13 @@ class SmartHomeActionExecutor(
      */
     private fun connectionRefusal(): ActionResult? = when (val state = client.state.value) {
         SmartHomeState.NotConfigured ->
-            ActionResult.Skipped("Smart home is not set up in this build")
+            ActionResult.Skipped("No smart home is set up")
 
         SmartHomeState.NotConnected ->
-            ActionResult.Skipped("Google Home is not connected")
+            ActionResult.Skipped("No smart home is connected")
 
         SmartHomeState.PermissionRequired ->
-            ActionResult.Failure("Google Home permission was withdrawn — reconnect in Settings")
+            ActionResult.Failure("Smart-home access was refused — reconnect in Settings")
 
         is SmartHomeState.Unavailable ->
             ActionResult.Failure("Smart home unavailable: ${state.failure.kind.describe()}")

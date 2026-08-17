@@ -11,8 +11,11 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.shelfit.sentinel.core.smarthome.SmartHomeProvider
 import com.shelfit.sentinel.core.trigger.TriggerConfiguration
 import com.shelfit.sentinel.core.trigger.TriggerId
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCredentials
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaRegion
 import com.shelfit.sentinel.trigger.audio.ClapCalibration
 import com.shelfit.sentinel.trigger.audio.ClapProfile
 import com.shelfit.sentinel.trigger.audio.DoubleClapConfiguration
@@ -32,13 +35,19 @@ data class SentinelSettings(
     /** Present once the user has completed and accepted a calibration run. */
     val calibration: ClapCalibration? = null,
     /**
-     * Substitutes a pretend smart home for the real provider.
-     *
-     * Off by default and offered only on the developer screen: it exists so the smart-home
-     * flow and its failure paths can be exercised without an account or hardware, and
-     * nobody should be shown a fake home they might mistake for their own.
+     * Which smart home to control, if any. [SmartHomeProvider.NONE] by default — a fresh
+     * install switches nothing until the user chooses.
      */
-    val simulatedSmartHome: Boolean = false,
+    val smartHomeProvider: SmartHomeProvider = SmartHomeProvider.Default,
+    /**
+     * Tuya cloud-project keys, pasted in by the user.
+     *
+     * Stored in the app's private DataStore. That is not readable by other apps on an
+     * unrooted device, but it is not encrypted either — see the note in
+     * `docs/tuya-setup.md`. Treated as a credential rather than a preference: never logged,
+     * never put in a `TriggerEvent`, never shown once entered.
+     */
+    val tuya: TuyaCredentials = TuyaCredentials(),
 )
 
 /**
@@ -93,8 +102,14 @@ class SettingsRepository(context: Context) {
                 hapticFeedbackEnabled = preferences[Keys.HapticFeedbackEnabled]
                     ?: defaults.hapticFeedbackEnabled,
                 calibration = preferences.readCalibration(),
-                simulatedSmartHome = preferences[Keys.SimulatedSmartHome]
-                    ?: defaults.simulatedSmartHome,
+                smartHomeProvider = SmartHomeProvider.fromName(
+                    preferences[Keys.SmartHomeProvider],
+                ),
+                tuya = TuyaCredentials(
+                    accessId = preferences[Keys.TuyaAccessId].orEmpty(),
+                    accessSecret = preferences[Keys.TuyaAccessSecret].orEmpty(),
+                    region = TuyaRegion.fromName(preferences[Keys.TuyaRegion]),
+                ),
             )
         }
 
@@ -107,7 +122,30 @@ class SettingsRepository(context: Context) {
     suspend fun setHapticFeedbackEnabled(enabled: Boolean) =
         edit(Keys.HapticFeedbackEnabled, enabled)
 
-    suspend fun setSimulatedSmartHome(enabled: Boolean) = edit(Keys.SimulatedSmartHome, enabled)
+    suspend fun setSmartHomeProvider(provider: SmartHomeProvider) =
+        edit(Keys.SmartHomeProvider, provider.name)
+
+    /**
+     * Saves the Tuya keys in one transaction.
+     *
+     * One write rather than three, so a half-entered credential can never be read by the
+     * client between edits and reported as a bad key.
+     */
+    suspend fun saveTuyaCredentials(credentials: TuyaCredentials) {
+        dataStore.edit { preferences ->
+            preferences[Keys.TuyaAccessId] = credentials.accessId.trim()
+            preferences[Keys.TuyaAccessSecret] = credentials.accessSecret.trim()
+            preferences[Keys.TuyaRegion] = credentials.region.name
+        }
+    }
+
+    suspend fun clearTuyaCredentials() {
+        dataStore.edit { preferences ->
+            preferences.remove(Keys.TuyaAccessId)
+            preferences.remove(Keys.TuyaAccessSecret)
+            preferences.remove(Keys.TuyaRegion)
+        }
+    }
 
     suspend fun saveCalibration(calibration: ClapCalibration) {
         dataStore.edit { preferences ->
@@ -160,7 +198,10 @@ class SettingsRepository(context: Context) {
         val DoubleClapEnabled = booleanPreferencesKey("double_clap_enabled")
         val Sensitivity = stringPreferencesKey("double_clap_sensitivity_level")
         val HapticFeedbackEnabled = booleanPreferencesKey("haptic_feedback_enabled")
-        val SimulatedSmartHome = booleanPreferencesKey("simulated_smart_home")
+        val SmartHomeProvider = stringPreferencesKey("smart_home_provider")
+        val TuyaAccessId = stringPreferencesKey("tuya_access_id")
+        val TuyaAccessSecret = stringPreferencesKey("tuya_access_secret")
+        val TuyaRegion = stringPreferencesKey("tuya_region")
 
         val CalibrationCapturedAt = longPreferencesKey("calibration_captured_at")
         val CalibrationSampleCount = intPreferencesKey("calibration_sample_count")

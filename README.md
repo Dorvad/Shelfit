@@ -6,18 +6,21 @@ A spare handset is left plugged in somewhere useful. It watches or listens for a
 physical cue — the first one being a **double clap** — and runs a configured
 action. All sensor interpretation happens on the device.
 
-## Status: stage 5 of 7 — smart-home actions, waiting on Google's SDK
+## Status: stage 5 of 8 — clap twice, a real light switches
 
 Clapping twice works end to end on a real device, **with the screen off**: a foreground
 service holds the microphone, the detector confirms the gesture, a rule matches it, and the
 phone buzzes. Nothing leaves the device and no audio is ever stored.
 
 An automation can now point at smart-home devices instead — lights and smart plugs, on, off or
-toggle, one or several. That whole path is built and tested, **but no real home can be reached
-yet**: the Google Home APIs Android SDK is not in this repository and did not resolve as a
-public Gradle dependency, so the one file it belongs in is deliberately empty rather than
-filled with guessed API calls. A simulated home, off by default, exercises the flow in the
-meantime. [`docs/google-home-setup.md`](docs/google-home-setup.md) has the rest.
+toggle, one or several — and **Tuya works end to end**. If your lights are in the Smart Life or
+Tuya Smart app, twenty minutes of browser setup connects them; no hub, no SDK download, and no
+new dependency in the app. [`docs/tuya-setup.md`](docs/tuya-setup.md) is the walkthrough.
+
+Google Home is a different story. Its SDK is a ZIP behind a signed-in developer account and the
+APIs need a Nest hub, so the one file it belongs in is deliberately empty rather than filled with
+guessed API calls — see [`docs/google-home-setup.md`](docs/google-home-setup.md). A simulated home
+covers every failure path without any account at all.
 
 Microphones, room acoustics and noise floors differ enough that one fixed threshold
 cannot serve every phone, so detection is **calibrated**: a guided flow measures the
@@ -43,11 +46,11 @@ What exists:
 - An editable rule system — WHEN a trigger fires, DO an action — with three local
   actions: vibrate, show a notification, write to the log
 - A smart-home action: choose devices, choose on/off/toggle, get per-device results
-  including partial success. Every provider failure is modelled and tested; the provider
-  itself is the one missing piece
-- 274 unit tests, including synthetic speech, music, doors, table knocks, changing
+  including partial success — working against Tuya, with three providers behind one interface
+- 291 unit tests, including synthetic speech, music, doors, table knocks, changing
   room noise, rapid transient bursts, simulated microphone outages, the full
-  clap → rule → executor path, and every smart-home failure condition
+  clap → rule → executor path, every smart-home failure condition, and the Tuya request
+  signature
 - A release build that passes R8 minification (~2.4 MB APK)
 
 The intended device is an old phone left plugged in. The screen does not need to stay
@@ -63,7 +66,7 @@ SENSOR  ->  TRIGGER DETECTOR  ->  TRIGGER EVENT  ->  RULE  ->  ACTION EXECUTOR
 Today:
 
 ```
-Microphone -> DoubleClapDetector -> DoubleClapDetected -> your rule -> VibrateAction
+Microphone -> DoubleClapDetector -> DoubleClapDetected -> your rule -> SmartHomeDeviceAction
 ```
 
 Inside the detector, four replaceable pieces:
@@ -79,7 +82,7 @@ synthetic waveforms with no microphone involved.
 Later, without touching the rule or action layers:
 
 ```
-Camera -> GestureDetector -> OpenPalmDetected -> rule -> GoogleHomeAction
+Camera -> GestureDetector -> OpenPalmDetected -> rule -> SmartHomeDeviceAction
 ```
 
 Each layer knows only the one before it. A detector is the only thing allowed to
@@ -259,23 +262,33 @@ short list of app categories, and two extra taps is a better trade than a policy
 | **2. Double clap detection** | `AudioRecord` capture, feature-based clap detection, gesture timing, permission handling, developer tuning screen, local haptic feedback | **Done** |
 | **3. Always-on operation** | Foreground service, notification controls, boot and upgrade handling, automatic recovery, health screen | **Done** |
 | **4. Actions** | Rule editor, persisted rules, local debug actions | **Done** |
-| **5. Smart home** | Google Home as an action provider: connect, choose a home, pick devices, on/off/toggle | **Done, except the provider** — see below |
-| **6. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Next |
-| **7. Reliability** | Multi-week soak testing, false-positive tuning, thermal behaviour, recovery from revoked permissions | Planned |
+| **5. Smart home** | A smart home as an action provider: connect, pick devices, on/off/toggle | **Done** — Tuya working, Google blocked on its SDK |
+| **6. Local device control** | Tuya over the LAN — removes the cloud round trip and the trial expiry | Candidate |
+| **7. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Next |
+| **8. Reliability** | Multi-week soak testing, false-positive tuning, thermal behaviour, recovery from revoked permissions | Planned |
 
 Battery draw over multi-day runs, and false-positive rates in a real room, can only be
-measured on a physical device — that measurement belongs to stage 6.
+measured on a physical device — that measurement belongs to stage 8.
 
-**The smart-home stage is complete apart from the provider.** A rule can point at lights and
-smart plugs, choose on, off or toggle, and report per-device results including partial
-success — all of it built against one interface and tested without an account or hardware.
-What is missing is the Google Home APIs Android SDK, which is not in this repository and did
-not resolve as a public Gradle dependency. `platform/smarthome/GoogleHomeClient.kt` is the one
-file it goes into, and `docs/google-home-setup.md` lists the account, project and signing-key
-work that has to happen first.
+**The smart-home stage is done.** Three providers sit behind one interface:
 
-To try the flow today, turn on the simulated home in Settings → Smart home. It is off by
-default and clearly labelled, so nobody mistakes a pretend lamp for their own.
+| Provider | State |
+| --- | --- |
+| **Tuya / Smart Life** | **Working.** Cloud API over `HttpsURLConnection`, no hub, no new dependency |
+| Google Home | Blocked — SDK is a login-gated download, and the APIs need a Nest hub |
+| Simulated home | A pretend home covering every failure path, for development |
+
+Adding Tuya changed no audio code, no rule code and no screen outside smart-home settings.
+That is the return on putting a seam there: `platform/smarthome/tuya/` is three files, and
+nothing above them knows Tuya exists.
+
+Tuya's app SDK was available and was turned down — it brings fastjson, okhttp, native libraries
+for two ABIs and an embedded V8 engine into an app built to run quietly on an old phone for
+weeks. Three REST endpoints, `javax.crypto` for signing and `org.json` for parsing cost nothing.
+
+One wart worth knowing: Tuya's IoT Core service is a **one-month free trial**, extendable free on
+request. Local LAN control would remove both that and the cloud round trip, and is the obvious
+next step.
 
 Deliberately **not** in scope yet: motion detection and gesture recognition. The architecture
 has extension points for both; neither has a speculative implementation.
@@ -288,7 +301,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 274 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 291 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```
@@ -316,6 +329,11 @@ The microphone is opened only while detection is running, by exactly one class. 
 detector's diagnostics report levels and counts, never samples, and a `TriggerEvent`
 carries only the gap between the two claps.
 
-Connecting a smart home does not change any of that. Nothing about the sound is sent
-anywhere — a device command carries a device id and a verb, and only when a rule fires.
-Nothing is linked until you connect it, and disconnecting drops the app's authorisation.
+Connecting a smart home does not change any of that. The app gained `INTERNET` for one purpose:
+sending a device id and a verb when a rule fires. **No sensor data leaves the phone** — there is
+no code path that could send it. Nothing is linked until you connect it, and disconnecting drops
+the app's authorisation.
+
+Provider credentials live in the app's private storage. That is not readable by other apps on an
+unrooted device, but it is not encrypted either, and `docs/tuya-setup.md` says so plainly rather
+than implying more protection than exists.

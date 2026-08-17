@@ -12,6 +12,13 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--
+      Smart-home control only. No sensor data is ever sent anywhere: the microphone is
+      analysed on the device and discarded, and a device command carries an id and a verb.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
       Sensor Mode runs microphone monitoring in a foreground service. That is the only
       legitimate way to keep the microphone open with the screen off, and its
       notification is how the user pauses, resumes and sees that the phone is listening.

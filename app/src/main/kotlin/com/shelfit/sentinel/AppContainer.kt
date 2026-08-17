@@ -12,6 +12,7 @@ import com.shelfit.sentinel.core.action.SmartHomeActionExecutor
 import com.shelfit.sentinel.core.sensor.SensorStatusProvider
 import com.shelfit.sentinel.core.smarthome.SmartHomeClient
 import com.shelfit.sentinel.core.smarthome.SmartHomeDirectory
+import com.shelfit.sentinel.core.smarthome.SmartHomeProvider
 import com.shelfit.sentinel.core.trigger.TriggerEngine
 import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.core.trigger.TriggerRegistry
@@ -31,6 +32,8 @@ import com.shelfit.sentinel.platform.audio.AudioRecordInput
 import com.shelfit.sentinel.platform.smarthome.GoogleHomeClient
 import com.shelfit.sentinel.platform.smarthome.SelectableSmartHomeClient
 import com.shelfit.sentinel.platform.smarthome.SimulatedSmartHomeClient
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCloudClient
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCredentials
 import com.shelfit.sentinel.service.SensorModeController
 import com.shelfit.sentinel.trigger.audio.ClapCalibrator
 import com.shelfit.sentinel.trigger.audio.DoubleClapConfiguration
@@ -38,6 +41,7 @@ import com.shelfit.sentinel.trigger.audio.DoubleClapDetector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -77,19 +81,33 @@ class AppContainer(context: Context) {
     val simulatedSmartHome = SimulatedSmartHomeClient()
 
     /**
-     * The one place a smart-home provider is chosen.
+     * The one place smart-home providers are registered.
      *
-     * [GoogleHomeClient] is the real seam and reports "not configured" until the Home APIs
-     * SDK is added to the build; the simulator is a developer aid, off unless the setting is
-     * on. Everything above this holds the interface, so completing the Google integration
-     * changes this file and `GoogleHomeClient`, and nothing else.
+     * [TuyaCloudClient] is the working one. [GoogleHomeClient] reports "not configured" until
+     * the Home APIs SDK is in the build, and the simulator is a developer aid. Everything
+     * above this holds the interface, which is why adding Tuya changed no audio code, no rule
+     * code and no screen outside the smart-home settings.
      */
     val smartHomeClient: SmartHomeClient = SelectableSmartHomeClient(
-        real = GoogleHomeClient(),
-        simulated = simulatedSmartHome,
-        useSimulated = settingsRepository.settings.map { it.simulatedSmartHome },
+        clients = mapOf(
+            SmartHomeProvider.TUYA to TuyaCloudClient { tuyaCredentials },
+            SmartHomeProvider.GOOGLE to GoogleHomeClient(),
+            SmartHomeProvider.SIMULATED to simulatedSmartHome,
+            // SmartHomeProvider.NONE is deliberately absent — the router serves it with a
+            // client that reports "not configured", so no caller needs a null check.
+        ),
+        chosen = settingsRepository.settings.map { it.smartHomeProvider },
         scope = applicationScope,
     )
+
+    /**
+     * The Tuya keys, kept in memory so signing a request never has to suspend.
+     *
+     * A request is signed inside `execute`, which runs when a clap fires. Reading DataStore
+     * at that moment would put a disk read on the path between the gesture and the light.
+     */
+    @Volatile
+    private var tuyaCredentials = TuyaCredentials()
 
     /** The chosen home's devices, shared by the connect screen and the rule editor. */
     val smartHomeDirectory = SmartHomeDirectory(smartHomeClient, applicationScope)
@@ -195,6 +213,15 @@ class AppContainer(context: Context) {
         // Cheap to leave running: it only suspends on the engine's event flow, which
         // produces nothing until a detector is started.
         automationCoordinator.start()
+
+        // Mirror the Tuya keys into memory. See tuyaCredentials for why the client reads a
+        // field rather than the flow.
+        applicationScope.launch {
+            settingsRepository.settings
+                .map { it.tuya }
+                .distinctUntilChanged()
+                .collect { tuyaCredentials = it }
+        }
     }
 
     /**
