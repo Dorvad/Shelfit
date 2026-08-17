@@ -6,7 +6,7 @@ import com.shelfit.sentinel.core.ThrowingActionExecutor
 import com.shelfit.sentinel.core.action.Action
 import com.shelfit.sentinel.core.action.ActionDispatcher
 import com.shelfit.sentinel.core.action.ActionResult
-import com.shelfit.sentinel.core.action.LogAction
+import com.shelfit.sentinel.core.action.DebugLogAction
 import com.shelfit.sentinel.core.trigger.TriggerEvent
 import com.shelfit.sentinel.core.trigger.TriggerId
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +30,7 @@ class AutomationCoordinatorTest {
         TriggerEvent(triggerId, elapsedRealtimeMillis = clock.now, confidence = confidence)
 
     private fun rule(
-        action: Action? = LogAction,
+        action: Action? = DebugLogAction,
         enabled: Boolean = true,
         minimumConfidence: Float = 0f,
         cooldownMillis: Long = 0L,
@@ -69,7 +69,7 @@ class AutomationCoordinatorTest {
         runCurrent()
 
         assertEquals(1, executor.executed.size)
-        assertEquals(LogAction, executor.executed.single().first)
+        assertEquals(DebugLogAction, executor.executed.single().first)
         assertEquals(ActionResult.Success, coordinator.outcomes.replayCache.last().result)
     }
 

@@ -14,6 +14,15 @@ class ActionDispatcher(executors: List<ActionExecutor>) {
 
     private val executors: List<ActionExecutor> = executors.toList()
 
+    /**
+     * Whether anything registered can perform [action].
+     *
+     * Used at startup to assert that every action the editor offers has an executor, so
+     * a missing registration is a crash on a developer's machine rather than a rule that
+     * silently does nothing on a user's.
+     */
+    fun supports(action: Action): Boolean = executors.any { it.canExecute(action) }
+
     suspend fun dispatch(action: Action, event: TriggerEvent): ActionResult {
         val executor = executors.firstOrNull { it.canExecute(action) }
             ?: return ActionResult.Skipped("No executor registered for '${action.type}'")

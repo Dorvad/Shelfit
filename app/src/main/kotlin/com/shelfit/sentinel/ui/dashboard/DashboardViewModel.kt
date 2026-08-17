@@ -23,8 +23,10 @@ data class TriggerRowUi(
     val name: String,
     val description: String,
     val state: TriggerState,
-    /** null when the matching rule has no action yet. */
-    val actionName: String?,
+    /** Actions attached to this trigger by enabled rules, in rule order. */
+    val actionNames: List<String>,
+    /** Enabled rules for this trigger that have no action set. */
+    val rulesWithoutAction: Int,
 )
 
 data class DashboardUiState(
@@ -64,13 +66,14 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
             sensors = sensors,
             health = health,
             triggers = registry.triggers.map { trigger ->
-                val rule = rules.firstOrNull { it.triggerId == trigger.id }
+                val enabledRules = rules.filter { it.triggerId == trigger.id && it.enabled }
                 TriggerRowUi(
                     id = trigger.id,
                     name = trigger.displayName,
                     description = trigger.description,
                     state = triggerStates[trigger.id] ?: TriggerState.Idle,
-                    actionName = rule?.action?.displayName,
+                    actionNames = enabledRules.mapNotNull { it.action?.displayName },
+                    rulesWithoutAction = enabledRules.count { it.action == null },
                 )
             },
         )

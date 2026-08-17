@@ -6,7 +6,7 @@ A spare handset is left plugged in somewhere useful. It watches or listens for a
 physical cue — the first one being a **double clap** — and runs a configured
 action. All sensor interpretation happens on the device.
 
-## Status: stage 3 of 6 — always-on Sensor Mode
+## Status: stage 4 of 6 — automations you can edit
 
 Clapping twice works end to end on a real device, **with the screen off**: a foreground
 service holds the microphone, the detector confirms the gesture, a rule matches it, and
@@ -33,8 +33,11 @@ What exists:
 - Sensor Mode: a `microphone` foreground service with Pause, Resume and Open App in its
   notification, automatic recovery when another app takes the microphone, and a health
   screen that names anything blocking unattended use
-- 167 unit tests, including synthetic speech, music, doors, table knocks, changing
-  room noise, rapid transient bursts and simulated microphone outages
+- An editable rule system — WHEN a trigger fires, DO an action — with three local
+  actions: vibrate, show a notification, write to the log
+- 212 unit tests, including synthetic speech, music, doors, table knocks, changing
+  room noise, rapid transient bursts, simulated microphone outages, and the full
+  clap → rule → executor path
 - A release build that passes R8 minification (~2.4 MB APK)
 
 The intended device is an old phone left plugged in. The screen does not need to stay
@@ -50,7 +53,7 @@ SENSOR  ->  TRIGGER DETECTOR  ->  TRIGGER EVENT  ->  RULE  ->  ACTION EXECUTOR
 Today:
 
 ```
-Microphone -> DoubleClapDetector -> DoubleClapDetected -> rule -> VibrateAction
+Microphone -> DoubleClapDetector -> DoubleClapDetected -> your rule -> VibrateAction
 ```
 
 Inside the detector, four replaceable pieces:
@@ -150,6 +153,34 @@ triggers overnight.
 arrive within two seconds. A double clap is two and a triple is three, so it engages
 only on genuine bursts: applause, hammering, cutlery in a drawer.
 
+## Automations
+
+A trigger on its own does nothing. An automation says what should happen when one fires:
+
+```
+WHEN  Double clap
+DO    Vibrate the phone
+```
+
+Editable from the **Automations** screen: add several, point them at different actions,
+disable one without deleting it, set how long to wait before the same rule may run again.
+Rules are persisted, so they survive restarts and upgrades.
+
+Three actions exist so far, all local to the phone — vibrate, show a notification, write
+to the log. That is deliberate: they prove the whole path works before anything talks to
+a smart-home API.
+
+**The detector knows nothing about any of this.** It reports "a double clap happened" and
+stops. The rule layer decides what that means, and an executor carries it out. Adding a
+smart-home action later touches the action layer and nothing else — no audio code, no
+detector, no rule engine. A test asserts that boundary rather than trusting a comment:
+pass anything from the action package into a detector and the build fails.
+
+Reserved identifiers exist for camera motion, hand gestures, ambient light and device
+movement. They are names only — no detectors, no permissions, and the editor does not
+offer them, because it offers what the app can actually detect. They exist so that rules
+written against them by a future version stay readable by this one.
+
 ## Sensor Mode
 
 Turning Sensor Mode on starts a foreground service typed `microphone`. That is the only
@@ -205,8 +236,8 @@ short list of app categories, and two extra taps is a better trade than a policy
 | **1. Architecture and shell** | Trigger/rule/action abstractions, Compose shell, dashboard, settings, navigation | **Done** |
 | **2. Double clap detection** | `AudioRecord` capture, feature-based clap detection, gesture timing, permission handling, developer tuning screen, local haptic feedback | **Done** |
 | **3. Always-on operation** | Foreground service, notification controls, boot and upgrade handling, automatic recovery, health screen | **Done** |
-| **4. Actions** | `ActionExecutor` implementations and a rule editor so a trigger can be bound to a real action. Google Home integration belongs here | Next |
-| **5. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Planned |
+| **4. Actions** | Rule editor, persisted rules, local debug actions | **Done** — Google Home still to come |
+| **5. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Next |
 | **6. Reliability** | Multi-week soak testing, false-positive tuning, thermal behaviour, recovery from revoked permissions | Planned |
 
 Battery draw over multi-day runs, and false-positive rates in a real room, can only be
@@ -224,7 +255,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 167 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 212 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```

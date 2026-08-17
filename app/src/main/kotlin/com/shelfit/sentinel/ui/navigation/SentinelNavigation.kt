@@ -10,6 +10,7 @@ import com.shelfit.sentinel.ui.calibration.CalibrationRoute
 import com.shelfit.sentinel.ui.claplab.ClapLabRoute
 import com.shelfit.sentinel.ui.dashboard.DashboardRoute
 import com.shelfit.sentinel.ui.health.SensorHealthRoute
+import com.shelfit.sentinel.ui.rules.RulesRoute
 import com.shelfit.sentinel.ui.settings.SettingsRoute
 
 /**
@@ -28,6 +29,9 @@ object Destination {
 
     /** Setup and health checks for unattended operation. */
     const val HEALTH = "health"
+
+    /** Rule editor: what should happen when a trigger fires. */
+    const val RULES = "rules"
 }
 
 @Composable
@@ -42,6 +46,7 @@ fun SentinelNavHost(
                 onOpenSettings = { navController.navigate(Destination.SETTINGS) },
                 onOpenClapLab = { navController.navigate(Destination.CLAP_LAB) },
                 onOpenHealth = { navController.navigate(Destination.HEALTH) },
+                onOpenRules = { navController.navigate(Destination.RULES) },
             )
         }
         composable(Destination.SETTINGS) {
@@ -56,6 +61,12 @@ fun SentinelNavHost(
             CalibrationRoute(
                 container = container,
                 onFinished = { navController.popBackStack() },
+            )
+        }
+        composable(Destination.RULES) {
+            RulesRoute(
+                container = container,
+                onNavigateBack = { navController.popBackStack() },
             )
         }
         composable(Destination.HEALTH) {

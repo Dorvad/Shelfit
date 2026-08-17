@@ -31,8 +31,10 @@ SENSOR  ->  TRIGGER DETECTOR  ->  TRIGGER EVENT  ->  RULE  ->  ACTION EXECUTOR
 | AutomationRule | `core/rule/AutomationRule.kt` | "When trigger X fires, run action Y", plus confidence floor and cooldown |
 | AutomationCoordinator | `core/rule/AutomationCoordinator.kt` | Matches events to rules and dispatches. The whole rule layer |
 | Action | `core/action/Action.kt` | Data describing what to do |
+| ActionCatalogue | `core/action/ActionCatalogue.kt` | The actions this build offers, and type→action for persistence |
 | ActionExecutor | `core/action/ActionExecutor.kt` | Performs one family of actions |
 | ActionDispatcher | `core/action/ActionDispatcher.kt` | Routes an action to the executor that accepts it |
+| RuleRepository | `data/RuleRepository.kt` | Persists the user's rules. The only thing the rule layer reads |
 
 Everything under `core/` is plain Kotlin with no Android imports, so it is fully
 unit-testable on the JVM. Android-specific implementations live in `platform/`.
@@ -182,6 +184,37 @@ executor in `actionDispatcher`. Nothing else changes.
 The rule, action, and UI layers should need no changes. If a change forces them
 to, the abstraction is wrong — fix the abstraction rather than reaching around it.
 
+### The trigger/action boundary
+
+**A detector must never reference the action layer.** It reports a `TriggerEvent`; what
+happens next is not its business. This is the property that will let a smart-home action
+be added without touching a single line of audio code, and it is enforced by
+`PipelineBoundaryTest` rather than by comments — the moment an `ActionDispatcher` is
+passed into a detector "just to make the notification easier", that test fails.
+
+The asymmetry is deliberate and worth stating: `AutomationRule` references both a
+`TriggerId` and an `Action`; neither references the rule. If you find yourself wanting a
+detector to know about a rule, the thing you actually want belongs in
+`AutomationCoordinator`.
+
+`TriggerEvent` carries identity, timing, confidence and a small `detail` map — never an
+`Action`, and never sensor content.
+
+### Adding an action
+
+1. Add the `Action` data type in `core/action/Action.kt`.
+2. Implement an `ActionExecutor` for it in `platform/`.
+3. Register the executor in `AppContainer`'s dispatcher.
+4. Add an `ActionKind` to the catalogue so the rule editor offers it.
+
+`AppContainer`'s initialiser asserts that every catalogued action has an executor, so
+forgetting step 3 is a crash on your machine rather than a rule that silently does
+nothing on a user's.
+
+Actions have no per-rule parameters yet. When one needs them — a smart-home action naming
+a device — `ActionKind` grows a factory, the editor grows fields, and `RuleCodec` grows a
+parameters field. Do not build that machinery before something needs it.
+
 ### Non-negotiables
 
 - **New sensors go through `TriggerDetector`.** Never open a microphone, camera, or
@@ -191,6 +224,10 @@ to, the abstraction is wrong — fix the abstraction rather than reaching around
   inside the detector.
 - **`events()` must be cold and cancellation-safe.** Cancelling the flow has to
   release the hardware; that is the app's only battery brake.
+- **Detectors know nothing about actions.** Enforced by test. See above.
+- **The coordinator must be collecting before events flow.** `TriggerEngine.events` has
+  no replay, so an event emitted with nothing listening is dropped. `AppContainer` starts
+  the coordinator in its initialiser for exactly this reason — do not make it lazy.
 
 ## Privacy principles
 
@@ -269,6 +306,26 @@ for claps, speech, music, door thuds and table knocks, and replays them through 
 Synthetic waveforms validate the logic, not real-world accuracy. Anything about
 sensitivity in a real room has to be measured on a device.
 
+## Rules
+
+`RuleRepository` persists rules in one string preference via `RuleCodec`: one line per
+rule, `|`-separated, text fields percent-encoded. A hand-written codec because there are
+seven fields and the dependency list is deliberately short.
+
+Two decoding behaviours are deliberate and tested:
+
+- **A blob always opens with a version line,** so an empty rule list is still a non-empty
+  string. That is what distinguishes "the user deleted every rule" from "never
+  configured", and stops defaults being re-seeded over a deliberate choice.
+- **Unknown action types and unknown trigger ids keep the rule,** with that part
+  unresolved. A downgrade, or a rule written by a later version, must not silently delete
+  the user's configuration.
+
+The editor offers what the `TriggerRegistry` and `ActionCatalogue` contain, so it can only
+ever offer things that exist. Reserved future `TriggerId`s are declared in
+`core/trigger/Trigger.kt` and deliberately have no detector, so they never appear as
+options.
+
 ## Requires user intervention
 
 Some things Android will not let the app fix by itself. These are product behaviour, not
@@ -286,14 +343,17 @@ bugs, and the health screen exists to make each one a single tap:
 
 ## Current state
 
-Stage 3. Sensor Mode runs double clap detection in a foreground service, so the screen
-can be off. Detection works end to end on device: microphone to `TriggerEvent` to rule to
-a vibration. `VibrateAction` is local feedback and the
+Stage 4, partly. The trigger → rule → action pipeline is complete and user-editable with
+local actions; Google Home is not started. Sensor Mode runs double clap detection in a
+foreground service, so the screen can be off.
+
+Three local actions exist: vibrate, show a notification, write to the log. All run
+entirely on the device. `VibrateAction` is local feedback and the
 only action that exists; Google Home, motion and gesture recognition are later
 stages with extension points but no implementations.
 
-Screens: dashboard, settings, `ui/health` — setup and health checks — `ui/calibration`
-— the guided flow — and `ui/claplab`,
+Screens: dashboard, settings, `ui/rules` — the rule editor — `ui/health` — setup and
+health checks — `ui/calibration` — the guided flow — and `ui/claplab`,
 a developer screen showing live level, the tracked background, the adaptive gate, the
 thresholds in force, rejection reasons and the event log.
 

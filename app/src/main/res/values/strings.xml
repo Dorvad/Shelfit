@@ -24,4 +24,9 @@
     <string name="notification_error_start_blocked">Android would not let listening start. Tap to try again.</string>
     <string name="notification_error_microphone_busy">Another app is using the microphone. Retrying.</string>
     <string name="notification_error_audio">Microphone capture failed. Tap for details.</string>
+
+    <string name="channel_automation_name">Automations</string>
+    <string name="channel_automation_description">Posted when a rule you created runs.</string>
+    <string name="action_notification_title">Trigger detected</string>
+    <string name="action_notification_text">%1$s (%2$d%% confidence)</string>
 </resources>

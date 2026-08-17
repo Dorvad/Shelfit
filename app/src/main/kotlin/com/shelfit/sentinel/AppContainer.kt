@@ -2,6 +2,7 @@ package com.shelfit.sentinel
 
 import android.content.Context
 import com.shelfit.sentinel.core.WallClock
+import com.shelfit.sentinel.core.action.ActionCatalogue
 import com.shelfit.sentinel.core.action.ActionDispatcher
 import com.shelfit.sentinel.core.diagnostics.EventLog
 import com.shelfit.sentinel.core.rule.AutomationCoordinator
@@ -18,6 +19,7 @@ import com.shelfit.sentinel.data.SettingsRepository
 import com.shelfit.sentinel.data.triggerConfigurations
 import com.shelfit.sentinel.platform.AndroidSensorStatusProvider
 import com.shelfit.sentinel.platform.LogActionExecutor
+import com.shelfit.sentinel.platform.NotificationActionExecutor
 import com.shelfit.sentinel.platform.SensorEnvironment
 import com.shelfit.sentinel.platform.SystemMonotonicClock
 import com.shelfit.sentinel.platform.SystemWallClock
@@ -57,7 +59,10 @@ class AppContainer(context: Context) {
 
     val settingsRepository = SettingsRepository(context)
 
-    val ruleRepository = RuleRepository()
+    /** The actions the rule editor may offer. Paired with the executors below. */
+    val actionCatalogue = ActionCatalogue.LocalDebug
+
+    val ruleRepository = RuleRepository(context, actionCatalogue)
 
     /** Operational state for Sensor Mode: the desired mode, timestamps, last error. */
     val sensorModeStore = SensorModeStore(context)
@@ -114,8 +119,10 @@ class AppContainer(context: Context) {
             VibrationActionExecutor(context) {
                 settingsRepository.settings.first().hapticFeedbackEnabled
             },
+            NotificationActionExecutor(context, triggerRegistry),
             LogActionExecutor(),
-            // Register future executors here — Google Home, webhooks, notifications.
+            // Register future executors here — Google Home, webhooks. Anything added to
+            // actionCatalogue needs one, and the init block below enforces that.
         ),
     )
 
@@ -142,6 +149,13 @@ class AppContainer(context: Context) {
     )
 
     init {
+        // An action offered in the editor with nothing able to perform it would be a rule
+        // that silently does nothing. Fail here, on a developer's machine.
+        val unsupported = actionCatalogue.kinds.filterNot { actionDispatcher.supports(it.template) }
+        require(unsupported.isEmpty()) {
+            "No executor registered for: " + unsupported.joinToString { it.type }
+        }
+
         // Cheap to leave running: it only suspends on the engine's event flow, which
         // produces nothing until a detector is started.
         automationCoordinator.start()

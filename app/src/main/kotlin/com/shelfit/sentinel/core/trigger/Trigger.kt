@@ -9,6 +9,24 @@ value class TriggerId(val value: String) {
 
     companion object {
         val DoubleClap = TriggerId("audio.double_clap")
+
+        /**
+         * Identifiers reserved for later stages.
+         *
+         * Declared, not implemented. No detector exists for any of these, so the rule
+         * editor will not offer them — it offers what is in the
+         * [com.shelfit.sentinel.core.trigger.TriggerRegistry], which is the single source
+         * of truth for what this build can actually detect.
+         *
+         * They exist here so the names are settled before anything persists them: a
+         * stored rule keyed on `camera.motion` written by a later version stays readable
+         * by an earlier one, which shows it as an unavailable trigger rather than
+         * discarding the user's rule.
+         */
+        val CameraMotion = TriggerId("camera.motion")
+        val HandGesture = TriggerId("camera.gesture")
+        val AmbientLight = TriggerId("light.ambient")
+        val DeviceMovement = TriggerId("motion.accelerometer")
     }
 }
 

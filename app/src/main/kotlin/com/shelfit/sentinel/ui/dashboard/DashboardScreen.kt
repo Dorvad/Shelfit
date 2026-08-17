@@ -48,6 +48,7 @@ fun DashboardRoute(
     onOpenSettings: () -> Unit,
     onOpenClapLab: () -> Unit,
     onOpenHealth: () -> Unit,
+    onOpenRules: () -> Unit,
     viewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.factory(container)),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -67,6 +68,7 @@ fun DashboardRoute(
         onOpenSettings = onOpenSettings,
         onOpenClapLab = onOpenClapLab,
         onOpenHealth = onOpenHealth,
+        onOpenRules = onOpenRules,
     )
 }
 
@@ -80,6 +82,7 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit,
     onOpenClapLab: () -> Unit,
     onOpenHealth: () -> Unit,
+    onOpenRules: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -119,6 +122,11 @@ fun DashboardScreen(
                 onToggleSensorMode = onToggleSensorMode,
                 onResume = onResume,
             )
+
+            TextButton(
+                onClick = onOpenRules,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Automations") }
 
             TextButton(
                 onClick = onOpenHealth,
@@ -201,11 +209,20 @@ private fun TriggerCard(trigger: TriggerRowUi) {
             value = trigger.state.label(),
             emphasise = trigger.state !is TriggerState.Active,
         )
-        LabelledRow(
-            label = "Action",
-            value = trigger.actionName ?: "Not configured",
-            emphasise = trigger.actionName == null,
-        )
+        if (trigger.actionNames.isEmpty()) {
+            LabelledRow(
+                label = "Action",
+                value = if (trigger.rulesWithoutAction > 0) "No action set" else "No automations",
+                emphasise = true,
+            )
+        } else {
+            trigger.actionNames.forEachIndexed { index, action ->
+                LabelledRow(
+                    label = if (index == 0) "Action" else " ",
+                    value = action,
+                )
+            }
+        }
     }
 }
 
@@ -337,7 +354,8 @@ private fun DashboardScreenPreview() {
                         name = "Double clap",
                         description = "Clap twice, quickly",
                         state = TriggerState.Idle,
-                        actionName = "Vibrate the phone",
+                        actionNames = listOf("Vibrate the phone"),
+                        rulesWithoutAction = 0,
                     ),
                 ),
             ),
@@ -352,6 +370,7 @@ private fun DashboardScreenPreview() {
             onOpenSettings = {},
             onOpenClapLab = {},
             onOpenHealth = {},
+            onOpenRules = {},
         )
     }
 }
