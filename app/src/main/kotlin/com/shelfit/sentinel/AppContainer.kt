@@ -8,7 +8,10 @@ import com.shelfit.sentinel.core.diagnostics.EventLog
 import com.shelfit.sentinel.core.rule.AutomationCoordinator
 import com.shelfit.sentinel.core.sensormode.SensorModeError
 import com.shelfit.sentinel.core.sensormode.SensorModeRuntime
+import com.shelfit.sentinel.core.action.SmartHomeActionExecutor
 import com.shelfit.sentinel.core.sensor.SensorStatusProvider
+import com.shelfit.sentinel.core.smarthome.SmartHomeClient
+import com.shelfit.sentinel.core.smarthome.SmartHomeDirectory
 import com.shelfit.sentinel.core.trigger.TriggerEngine
 import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.core.trigger.TriggerRegistry
@@ -25,6 +28,9 @@ import com.shelfit.sentinel.platform.SystemMonotonicClock
 import com.shelfit.sentinel.platform.SystemWallClock
 import com.shelfit.sentinel.platform.VibrationActionExecutor
 import com.shelfit.sentinel.platform.audio.AudioRecordInput
+import com.shelfit.sentinel.platform.smarthome.GoogleHomeClient
+import com.shelfit.sentinel.platform.smarthome.SelectableSmartHomeClient
+import com.shelfit.sentinel.platform.smarthome.SimulatedSmartHomeClient
 import com.shelfit.sentinel.service.SensorModeController
 import com.shelfit.sentinel.trigger.audio.ClapCalibrator
 import com.shelfit.sentinel.trigger.audio.DoubleClapConfiguration
@@ -33,6 +39,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -59,8 +66,36 @@ class AppContainer(context: Context) {
 
     val settingsRepository = SettingsRepository(context)
 
+    /**
+     * The pretend home, exposed as its own type so the developer screen can stage faults
+     * on it.
+     *
+     * A concession like `DoubleClapDetector.diagnostics`: a developer tool needs more than
+     * the abstraction offers, and widening [SmartHomeClient] with fault injection to serve
+     * one screen would put test machinery in the contract a real provider has to implement.
+     */
+    val simulatedSmartHome = SimulatedSmartHomeClient()
+
+    /**
+     * The one place a smart-home provider is chosen.
+     *
+     * [GoogleHomeClient] is the real seam and reports "not configured" until the Home APIs
+     * SDK is added to the build; the simulator is a developer aid, off unless the setting is
+     * on. Everything above this holds the interface, so completing the Google integration
+     * changes this file and `GoogleHomeClient`, and nothing else.
+     */
+    val smartHomeClient: SmartHomeClient = SelectableSmartHomeClient(
+        real = GoogleHomeClient(),
+        simulated = simulatedSmartHome,
+        useSimulated = settingsRepository.settings.map { it.simulatedSmartHome },
+        scope = applicationScope,
+    )
+
+    /** The chosen home's devices, shared by the connect screen and the rule editor. */
+    val smartHomeDirectory = SmartHomeDirectory(smartHomeClient, applicationScope)
+
     /** The actions the rule editor may offer. Paired with the executors below. */
-    val actionCatalogue = ActionCatalogue.LocalDebug
+    val actionCatalogue = ActionCatalogue.WithSmartHome
 
     val ruleRepository = RuleRepository(context, actionCatalogue)
 
@@ -121,7 +156,8 @@ class AppContainer(context: Context) {
             },
             NotificationActionExecutor(context, triggerRegistry),
             LogActionExecutor(),
-            // Register future executors here — Google Home, webhooks. Anything added to
+            SmartHomeActionExecutor(smartHomeClient),
+            // Register future executors here — webhooks, HTTP. Anything added to
             // actionCatalogue needs one, and the init block below enforces that.
         ),
     )

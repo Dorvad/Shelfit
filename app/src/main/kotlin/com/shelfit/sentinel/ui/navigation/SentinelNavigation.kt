@@ -12,6 +12,7 @@ import com.shelfit.sentinel.ui.dashboard.DashboardRoute
 import com.shelfit.sentinel.ui.health.SensorHealthRoute
 import com.shelfit.sentinel.ui.rules.RulesRoute
 import com.shelfit.sentinel.ui.settings.SettingsRoute
+import com.shelfit.sentinel.ui.smarthome.SmartHomeRoute
 
 /**
  * Screen identifiers. String routes keep the navigation dependency minimal; if the
@@ -32,6 +33,9 @@ object Destination {
 
     /** Rule editor: what should happen when a trigger fires. */
     const val RULES = "rules"
+
+    /** Connect a smart home and see which devices this app can switch. */
+    const val SMART_HOME = "smart-home"
 }
 
 @Composable
@@ -55,6 +59,13 @@ fun SentinelNavHost(
                 onNavigateBack = { navController.popBackStack() },
                 onOpenCalibration = { navController.navigate(Destination.CALIBRATION) },
                 onOpenClapLab = { navController.navigate(Destination.CLAP_LAB) },
+                onOpenSmartHome = { navController.navigate(Destination.SMART_HOME) },
+            )
+        }
+        composable(Destination.SMART_HOME) {
+            SmartHomeRoute(
+                container = container,
+                onNavigateBack = { navController.popBackStack() },
             )
         }
         composable(Destination.CALIBRATION) {

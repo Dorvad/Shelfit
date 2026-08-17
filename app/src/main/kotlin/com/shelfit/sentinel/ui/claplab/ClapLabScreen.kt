@@ -475,6 +475,7 @@ private fun ActionResult.label(): String = when (this) {
     ActionResult.Success -> "Success"
     is ActionResult.Skipped -> "Skipped — $reason"
     is ActionResult.Failure -> "Failed — $message"
+    is ActionResult.Partial -> "Partly done — $message"
 }
 
 private const val FLASH_MILLIS = 1_600L

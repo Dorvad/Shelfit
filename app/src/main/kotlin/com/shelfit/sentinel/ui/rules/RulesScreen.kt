@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shelfit.sentinel.AppContainer
 import com.shelfit.sentinel.R
+import com.shelfit.sentinel.core.smarthome.DeviceId
+import com.shelfit.sentinel.core.smarthome.SmartHomeCommand
 import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.ui.components.SectionCard
 import com.shelfit.sentinel.ui.theme.SentinelTheme
@@ -61,6 +64,8 @@ fun RulesRoute(
         onDraftAction = viewModel::setDraftAction,
         onDraftEnabled = viewModel::setDraftEnabled,
         onDraftCooldown = viewModel::setDraftCooldown,
+        onToggleDevice = viewModel::toggleDraftDevice,
+        onDraftCommand = viewModel::setDraftCommand,
         onSaveDraft = viewModel::saveDraft,
         onCancelDraft = viewModel::cancelDraft,
         onNavigateBack = onNavigateBack,
@@ -80,6 +85,8 @@ fun RulesScreen(
     onDraftAction: (String) -> Unit,
     onDraftEnabled: (Boolean) -> Unit,
     onDraftCooldown: (Long) -> Unit,
+    onToggleDevice: (DeviceId, String) -> Unit,
+    onDraftCommand: (SmartHomeCommand) -> Unit,
     onSaveDraft: () -> Unit,
     onCancelDraft: () -> Unit,
     onNavigateBack: () -> Unit,
@@ -129,10 +136,13 @@ fun RulesScreen(
                     draft = draft,
                     triggers = uiState.triggers,
                     actions = uiState.actions,
+                    smartHome = uiState.smartHome,
                     onDraftTrigger = onDraftTrigger,
                     onDraftAction = onDraftAction,
                     onDraftEnabled = onDraftEnabled,
                     onDraftCooldown = onDraftCooldown,
+                    onToggleDevice = onToggleDevice,
+                    onDraftCommand = onDraftCommand,
                     onSave = onSaveDraft,
                     onCancel = onCancelDraft,
                     onDelete = { onDeleteRule(draft.id) },
@@ -183,9 +193,9 @@ private fun RuleList(
     }
 
     Text(
-        text = "Only local actions exist so far — they run entirely on this phone. " +
-            "Smart-home actions arrive in a later stage, and the automations you create " +
-            "now will point at them without being rebuilt.",
+        text = "Local actions run entirely on this phone. Smart-home actions need a home " +
+            "connected in Settings first — you can build the automation either way, and " +
+            "it will start working once the home is linked.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -263,10 +273,13 @@ private fun RuleEditor(
     draft: RuleDraft,
     triggers: List<TriggerOption>,
     actions: List<ActionOption>,
+    smartHome: SmartHomeEditorUi,
     onDraftTrigger: (TriggerId) -> Unit,
     onDraftAction: (String) -> Unit,
     onDraftEnabled: (Boolean) -> Unit,
     onDraftCooldown: (Long) -> Unit,
+    onToggleDevice: (DeviceId, String) -> Unit,
+    onDraftCommand: (SmartHomeCommand) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit,
@@ -305,6 +318,15 @@ private fun RuleEditor(
                 onSelect = { onDraftAction(action.type) },
             )
         }
+    }
+
+    if (draft.isSmartHome) {
+        SmartHomeActionEditor(
+            draft = draft,
+            smartHome = smartHome,
+            onToggleDevice = onToggleDevice,
+            onCommand = onDraftCommand,
+        )
     }
 
     SectionCard("Options") {
@@ -346,8 +368,20 @@ private fun RuleEditor(
         )
     }
 
-    Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
+    Button(
+        onClick = onSave,
+        // An incomplete smart-home action would save a rule that fires and does nothing.
+        enabled = draft.complete,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Text(if (draft.isNew) "Add automation" else "Save changes")
+    }
+    if (!draft.complete) {
+        Text(
+            text = "Choose at least one device to save this automation.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
     }
     OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
         Text("Cancel")
@@ -355,6 +389,125 @@ private fun RuleEditor(
     if (!draft.isNew) {
         TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
             Text("Delete automation")
+        }
+    }
+}
+
+/**
+ * Devices and the command to send them.
+ *
+ * The device list is the live one; the chosen set comes from the draft. That difference is
+ * deliberate — a device that has left the home stays chosen and is called out, rather than
+ * disappearing from a rule the user thought was configured.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SmartHomeActionEditor(
+    draft: RuleDraft,
+    smartHome: SmartHomeEditorUi,
+    onToggleDevice: (DeviceId, String) -> Unit,
+    onCommand: (SmartHomeCommand) -> Unit,
+) {
+    SectionCard("Devices") {
+        smartHome.statusMessage?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            smartHome.loading -> Text(
+                text = "Loading devices…",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            smartHome.devices.isEmpty() && smartHome.connected -> Text(
+                text = "No lights or smart plugs were found in this home.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            else -> smartHome.devices.forEach { device ->
+                DeviceChoiceRow(
+                    device = device,
+                    onToggle = { onToggleDevice(device.id, device.name) },
+                )
+            }
+        }
+
+        // Chosen devices the current list does not contain — an offline home, or a device
+        // that has been removed. Shown as checked so the rule reads as what it actually is.
+        val listed = smartHome.devices.map { it.id }.toSet()
+        draft.targets.filterNot { it.deviceId in listed }.forEach { target ->
+            DeviceChoiceRow(
+                device = DeviceChoiceUi(
+                    id = target.deviceId,
+                    name = target.name,
+                    detail = "Not in the list right now",
+                    chosen = true,
+                    warning = "Cannot be checked at the moment",
+                    stateKnown = false,
+                ),
+                onToggle = { onToggleDevice(target.deviceId, target.name) },
+            )
+        }
+    }
+
+    SectionCard("What to do with them") {
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SmartHomeCommand.entries.forEachIndexed { index, command ->
+                SegmentedButton(
+                    selected = command == draft.command,
+                    onClick = { onCommand(command) },
+                    // Toggle needs to know the current state of every chosen device.
+                    enabled = command != SmartHomeCommand.TOGGLE || smartHome.toggleAvailable,
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = SmartHomeCommand.entries.size,
+                    ),
+                    label = { Text(command.label) },
+                )
+            }
+        }
+        Text(
+            text = if (smartHome.toggleAvailable) {
+                "Toggle switches each device to the opposite of what it is now."
+            } else {
+                "Toggle is unavailable: one of the chosen devices does not report whether " +
+                    "it is on, and guessing could switch it the wrong way."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun DeviceChoiceRow(device: DeviceChoiceUi, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Checkbox(checked = device.chosen, onCheckedChange = { onToggle() })
+        Column(modifier = Modifier.weight(1f)) {
+            Text(device.name, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = device.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            device.warning?.let { warning ->
+                Text(
+                    text = warning,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
 }
@@ -429,6 +582,8 @@ private fun RulesScreenPreview() {
             onDraftAction = {},
             onDraftEnabled = {},
             onDraftCooldown = {},
+            onToggleDevice = { _, _ -> },
+            onDraftCommand = {},
             onSaveDraft = {},
             onCancelDraft = {},
             onNavigateBack = {},

@@ -31,6 +31,14 @@ data class SentinelSettings(
     val hapticFeedbackEnabled: Boolean = true,
     /** Present once the user has completed and accepted a calibration run. */
     val calibration: ClapCalibration? = null,
+    /**
+     * Substitutes a pretend smart home for the real provider.
+     *
+     * Off by default and offered only on the developer screen: it exists so the smart-home
+     * flow and its failure paths can be exercised without an account or hardware, and
+     * nobody should be shown a fake home they might mistake for their own.
+     */
+    val simulatedSmartHome: Boolean = false,
 )
 
 /**
@@ -85,6 +93,8 @@ class SettingsRepository(context: Context) {
                 hapticFeedbackEnabled = preferences[Keys.HapticFeedbackEnabled]
                     ?: defaults.hapticFeedbackEnabled,
                 calibration = preferences.readCalibration(),
+                simulatedSmartHome = preferences[Keys.SimulatedSmartHome]
+                    ?: defaults.simulatedSmartHome,
             )
         }
 
@@ -96,6 +106,8 @@ class SettingsRepository(context: Context) {
 
     suspend fun setHapticFeedbackEnabled(enabled: Boolean) =
         edit(Keys.HapticFeedbackEnabled, enabled)
+
+    suspend fun setSimulatedSmartHome(enabled: Boolean) = edit(Keys.SimulatedSmartHome, enabled)
 
     suspend fun saveCalibration(calibration: ClapCalibration) {
         dataStore.edit { preferences ->
@@ -148,6 +160,7 @@ class SettingsRepository(context: Context) {
         val DoubleClapEnabled = booleanPreferencesKey("double_clap_enabled")
         val Sensitivity = stringPreferencesKey("double_clap_sensitivity_level")
         val HapticFeedbackEnabled = booleanPreferencesKey("haptic_feedback_enabled")
+        val SimulatedSmartHome = booleanPreferencesKey("simulated_smart_home")
 
         val CalibrationCapturedAt = longPreferencesKey("calibration_captured_at")
         val CalibrationSampleCount = intPreferencesKey("calibration_sample_count")

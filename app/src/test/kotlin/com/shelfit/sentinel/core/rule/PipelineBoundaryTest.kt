@@ -1,7 +1,12 @@
 package com.shelfit.sentinel.core.rule
 
+import com.shelfit.sentinel.core.action.SmartHomeActionExecutor
 import com.shelfit.sentinel.core.trigger.TriggerEvent
+import com.shelfit.sentinel.trigger.audio.ClapCandidateDetector
+import com.shelfit.sentinel.trigger.audio.ClapFeatureExtractor
+import com.shelfit.sentinel.trigger.audio.DoubleClapConfiguration
 import com.shelfit.sentinel.trigger.audio.DoubleClapDetector
+import com.shelfit.sentinel.trigger.audio.DoubleClapStateMachine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -102,6 +107,62 @@ class PipelineBoundaryTest {
             "a rule names a trigger",
             fields.any { it.name == "triggerId" },
         )
+    }
+
+    /**
+     * The stage-6 requirement, as an assertion: the clap modules must not depend on a
+     * smart-home provider.
+     *
+     * Checked against the whole audio package rather than the detector alone, because the
+     * tempting shortcut is not in the detector — it is a helper somewhere in the pipeline
+     * that "just needs to know whether the lights are on".
+     */
+    @Test
+    fun `the audio pipeline knows nothing about smart homes`() {
+        val smartHomePackage = "com.shelfit.sentinel.core.smarthome"
+
+        val audioClasses = listOf(
+            DoubleClapDetector::class.java,
+            ClapFeatureExtractor::class.java,
+            ClapCandidateDetector::class.java,
+            DoubleClapStateMachine::class.java,
+            DoubleClapConfiguration::class.java,
+        )
+
+        val offending = audioClasses.flatMap { type ->
+            val referenced = type.declaredFields.filterNot { it.isSynthetic }.map { it.type.name } +
+                type.declaredMethods.flatMap {
+                    it.parameterTypes.map(Class<*>::getName) + it.returnType.name
+                } +
+                type.constructors.flatMap { it.parameterTypes.map(Class<*>::getName) }
+            referenced.filter { it.startsWith(smartHomePackage) }.map { "${type.simpleName}: $it" }
+        }
+
+        assertEquals(
+            "a detector that can read a light bulb can also decide what to do about it",
+            emptyList<String>(),
+            offending,
+        )
+    }
+
+    /**
+     * The smart-home executor is the meeting point, and it must meet the *interface*.
+     *
+     * If a vendor type reached it, the seam would have failed and the rule layer would be
+     * coupled to one provider.
+     */
+    @Test
+    fun `the smart-home executor holds only the app's own client interface`() {
+        val platformPackage = "com.shelfit.sentinel.platform"
+
+        val offending = SmartHomeActionExecutor::class.java
+            .let { type ->
+                type.declaredFields.filterNot { it.isSynthetic }.map { it.type.name } +
+                    type.constructors.flatMap { it.parameterTypes.map(Class<*>::getName) }
+            }
+            .filter { it.startsWith(platformPackage) }
+
+        assertEquals(emptyList<String>(), offending)
     }
 
     @Test

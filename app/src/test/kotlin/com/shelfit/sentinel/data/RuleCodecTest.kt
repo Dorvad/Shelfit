@@ -2,8 +2,12 @@ package com.shelfit.sentinel.data
 
 import com.shelfit.sentinel.core.action.ActionCatalogue
 import com.shelfit.sentinel.core.action.ShowNotificationAction
+import com.shelfit.sentinel.core.action.SmartHomeDeviceAction
+import com.shelfit.sentinel.core.action.SmartHomeTarget
 import com.shelfit.sentinel.core.action.VibrateAction
 import com.shelfit.sentinel.core.rule.AutomationRule
+import com.shelfit.sentinel.core.smarthome.DeviceId
+import com.shelfit.sentinel.core.smarthome.SmartHomeCommand
 import com.shelfit.sentinel.core.trigger.TriggerId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -145,5 +149,86 @@ class RuleCodecTest {
         val stored = "v1\n|name|audio.double_clap|debug.vibrate|true|0.0|0"
 
         assertTrue(RuleCodec.decode(stored, catalogue)!!.isEmpty())
+    }
+
+    /**
+     * Action parameters, added in v2.
+     *
+     * The device list a user assembled is the most laborious thing they configure, so it has
+     * to survive both a round trip and an upgrade from a format that never stored it.
+     */
+    @Test
+    fun `a smart-home action keeps its devices and command across a round trip`() {
+        val withSmartHome = ActionCatalogue.WithSmartHome
+        val action = SmartHomeDeviceAction(
+            targets = listOf(
+                SmartHomeTarget(DeviceId("lamp"), "Living room lamp"),
+                SmartHomeTarget(DeviceId("plug"), "Kettle plug"),
+            ),
+            command = SmartHomeCommand.ON,
+        )
+
+        val decoded = RuleCodec
+            .decode(RuleCodec.encode(listOf(rule(action = action))), withSmartHome)!!
+            .single()
+
+        assertEquals(action, decoded.action)
+    }
+
+    @Test
+    fun `a device name containing the separators does not corrupt the record`() {
+        // Users name devices whatever they like, and "Lamp = kitchen; hall | main" is a
+        // legal name. Encoding has to survive every separator the format uses.
+        val withSmartHome = ActionCatalogue.WithSmartHome
+        val action = SmartHomeDeviceAction(
+            targets = listOf(SmartHomeTarget(DeviceId("a|b;c=d"), "Lamp = kitchen; hall | main")),
+        )
+
+        val decoded = RuleCodec
+            .decode(RuleCodec.encode(listOf(rule(action = action))), withSmartHome)!!
+            .single()
+
+        assertEquals(action, decoded.action)
+    }
+
+    @Test
+    fun `rules written by version 1 are still readable`() {
+        // An upgrade must not delete the automations a user already had.
+        val v1 = "v1\nrule.1|Double+clap|audio.double_clap|debug.vibrate|true|0.0|1500"
+
+        val decoded = RuleCodec.decode(v1, catalogue)!!.single()
+
+        assertEquals("rule.1", decoded.id)
+        assertEquals("Double clap", decoded.name)
+        assertEquals(TriggerId.DoubleClap, decoded.triggerId)
+        assertEquals(VibrateAction(), decoded.action)
+        assertEquals(1_500L, decoded.cooldownMillis)
+    }
+
+    @Test
+    fun `a version 1 record with the field count of version 2 is rejected as malformed`() {
+        // Field counts are per version, so a line cannot be silently misread as another
+        // version's layout with everything shifted by one.
+        val mixed = "v1\nrule.1|name|audio.double_clap|debug.vibrate|true|0.0|1500|extra"
+
+        assertTrue(RuleCodec.decode(mixed, catalogue)!!.isEmpty())
+    }
+
+    @Test
+    fun `encoding is stable, so saving an unchanged rule produces an unchanged blob`() {
+        // DataStore wakes every collector on a write. An unstable encoding would restart
+        // detection on an idle save.
+        val rules = listOf(
+            rule(
+                action = SmartHomeDeviceAction(
+                    targets = listOf(
+                        SmartHomeTarget(DeviceId("b"), "Second"),
+                        SmartHomeTarget(DeviceId("a"), "First"),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(RuleCodec.encode(rules), RuleCodec.encode(rules))
     }
 }

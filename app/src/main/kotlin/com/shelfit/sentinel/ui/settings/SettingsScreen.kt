@@ -50,6 +50,7 @@ fun SettingsRoute(
     onNavigateBack: () -> Unit,
     onOpenCalibration: () -> Unit,
     onOpenClapLab: () -> Unit,
+    onOpenSmartHome: () -> Unit,
     viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(container)),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -63,6 +64,7 @@ fun SettingsRoute(
         onClearCalibration = viewModel::clearCalibration,
         onOpenCalibration = onOpenCalibration,
         onOpenClapLab = onOpenClapLab,
+        onOpenSmartHome = onOpenSmartHome,
         onNavigateBack = onNavigateBack,
     )
 }
@@ -78,6 +80,7 @@ fun SettingsScreen(
     onClearCalibration: () -> Unit,
     onOpenCalibration: () -> Unit,
     onOpenClapLab: () -> Unit,
+    onOpenSmartHome: () -> Unit,
     onNavigateBack: () -> Unit,
 ) {
     Scaffold(
@@ -129,6 +132,20 @@ fun SettingsScreen(
                 onOpenCalibration = onOpenCalibration,
                 onClearCalibration = onClearCalibration,
             )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+            SectionHeader("Smart home")
+
+            Text(
+                text = "Link a smart home so an automation can switch your lights and " +
+                    "plugs. Nothing is linked until you connect it.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onOpenSmartHome, modifier = Modifier.fillMaxWidth()) {
+                Text("Smart home setup")
+            }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
@@ -322,6 +339,7 @@ private fun SettingsScreenPreview() {
             onClearCalibration = {},
             onOpenCalibration = {},
             onOpenClapLab = {},
+            onOpenSmartHome = {},
             onNavigateBack = {},
         )
     }

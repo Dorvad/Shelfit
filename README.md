@@ -6,11 +6,18 @@ A spare handset is left plugged in somewhere useful. It watches or listens for a
 physical cue — the first one being a **double clap** — and runs a configured
 action. All sensor interpretation happens on the device.
 
-## Status: stage 4 of 6 — automations you can edit
+## Status: stage 5 of 7 — smart-home actions, waiting on Google's SDK
 
 Clapping twice works end to end on a real device, **with the screen off**: a foreground
-service holds the microphone, the detector confirms the gesture, a rule matches it, and
-the phone buzzes. Nothing leaves the device and no audio is ever stored.
+service holds the microphone, the detector confirms the gesture, a rule matches it, and the
+phone buzzes. Nothing leaves the device and no audio is ever stored.
+
+An automation can now point at smart-home devices instead — lights and smart plugs, on, off or
+toggle, one or several. That whole path is built and tested, **but no real home can be reached
+yet**: the Google Home APIs Android SDK is not in this repository and did not resolve as a
+public Gradle dependency, so the one file it belongs in is deliberately empty rather than
+filled with guessed API calls. A simulated home, off by default, exercises the flow in the
+meantime. [`docs/google-home-setup.md`](docs/google-home-setup.md) has the rest.
 
 Microphones, room acoustics and noise floors differ enough that one fixed threshold
 cannot serve every phone, so detection is **calibrated**: a guided flow measures the
@@ -35,9 +42,12 @@ What exists:
   screen that names anything blocking unattended use
 - An editable rule system — WHEN a trigger fires, DO an action — with three local
   actions: vibrate, show a notification, write to the log
-- 212 unit tests, including synthetic speech, music, doors, table knocks, changing
-  room noise, rapid transient bursts, simulated microphone outages, and the full
-  clap → rule → executor path
+- A smart-home action: choose devices, choose on/off/toggle, get per-device results
+  including partial success. Every provider failure is modelled and tested; the provider
+  itself is the one missing piece
+- 274 unit tests, including synthetic speech, music, doors, table knocks, changing
+  room noise, rapid transient bursts, simulated microphone outages, the full
+  clap → rule → executor path, and every smart-home failure condition
 - A release build that passes R8 minification (~2.4 MB APK)
 
 The intended device is an old phone left plugged in. The screen does not need to stay
@@ -159,22 +169,33 @@ A trigger on its own does nothing. An automation says what should happen when on
 
 ```
 WHEN  Double clap
-DO    Vibrate the phone
+DO    Toggle Living room lamp
 ```
 
 Editable from the **Automations** screen: add several, point them at different actions,
 disable one without deleting it, set how long to wait before the same rule may run again.
 Rules are persisted, so they survive restarts and upgrades.
 
-Three actions exist so far, all local to the phone — vibrate, show a notification, write
-to the log. That is deliberate: they prove the whole path works before anything talks to
-a smart-home API.
+Four actions exist. Three are local to the phone — vibrate, show a notification, write to the
+log — and the fourth switches smart-home devices: lights and smart plugs, on, off or toggle,
+one device or several. Pick several and the outcome is reported per device, because "2 of 3
+lamps switched" is neither a success nor a failure and reporting it as either would hide a
+problem or invent one.
+
+Toggle is only offered when every chosen device reports whether it is currently on. A toggle
+that guesses which way to switch something is worse than one that declines.
 
 **The detector knows nothing about any of this.** It reports "a double clap happened" and
-stops. The rule layer decides what that means, and an executor carries it out. Adding a
-smart-home action later touches the action layer and nothing else — no audio code, no
-detector, no rule engine. A test asserts that boundary rather than trusting a comment:
-pass anything from the action package into a detector and the build fails.
+stops. The rule layer decides what that means, and an executor carries it out. Adding the
+smart-home action touched the action layer and nothing else — no audio code, no detector, no
+rule engine. Tests assert that boundary rather than trusting a comment: pass anything from the
+action package into a detector, or let a smart-home type reach the audio pipeline, and the
+build fails.
+
+The same separation holds one level down. A provider sits behind a single interface, so the
+entire app is written in terms of "homes, devices and commands" rather than any vendor's SDK.
+That is what makes every failure — no network, an unplugged lamp, consent withdrawn last
+Tuesday — a unit test rather than an afternoon of unplugging lamps.
 
 Reserved identifiers exist for camera motion, hand gestures, ambient light and device
 movement. They are names only — no detectors, no permissions, and the editor does not
@@ -221,6 +242,7 @@ and the app's job is to make it exactly one:
 | Another app using the microphone | Retries on its own, backing off | Nothing |
 | Notifications switched off | Listening still works, but its controls are invisible | Health screen offers to fix it |
 | Phone stops listening by itself | Some manufacturers kill background apps regardless of foreground services | Exempt the app from battery optimisation |
+| Smart-home access withdrawn | Automations report it and stop switching devices | Reconnect in Settings → Smart home |
 
 **Battery optimisation** is genuinely optional. Stock Android will not stop a listening
 foreground service for it, so the health screen says so rather than crying wolf. It
@@ -236,16 +258,27 @@ short list of app categories, and two extra taps is a better trade than a policy
 | **1. Architecture and shell** | Trigger/rule/action abstractions, Compose shell, dashboard, settings, navigation | **Done** |
 | **2. Double clap detection** | `AudioRecord` capture, feature-based clap detection, gesture timing, permission handling, developer tuning screen, local haptic feedback | **Done** |
 | **3. Always-on operation** | Foreground service, notification controls, boot and upgrade handling, automatic recovery, health screen | **Done** |
-| **4. Actions** | Rule editor, persisted rules, local debug actions | **Done** — Google Home still to come |
-| **5. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Next |
-| **6. Reliability** | Multi-week soak testing, false-positive tuning, thermal behaviour, recovery from revoked permissions | Planned |
+| **4. Actions** | Rule editor, persisted rules, local debug actions | **Done** |
+| **5. Smart home** | Google Home as an action provider: connect, choose a home, pick devices, on/off/toggle | **Done, except the provider** — see below |
+| **6. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Next |
+| **7. Reliability** | Multi-week soak testing, false-positive tuning, thermal behaviour, recovery from revoked permissions | Planned |
 
 Battery draw over multi-day runs, and false-positive rates in a real room, can only be
 measured on a physical device — that measurement belongs to stage 6.
 
-Deliberately **not** in scope yet: Google Home, motion detection, gesture
-recognition. The architecture has extension points for all three; none of them
-have speculative implementations.
+**The smart-home stage is complete apart from the provider.** A rule can point at lights and
+smart plugs, choose on, off or toggle, and report per-device results including partial
+success — all of it built against one interface and tested without an account or hardware.
+What is missing is the Google Home APIs Android SDK, which is not in this repository and did
+not resolve as a public Gradle dependency. `platform/smarthome/GoogleHomeClient.kt` is the one
+file it goes into, and `docs/google-home-setup.md` lists the account, project and signing-key
+work that has to happen first.
+
+To try the flow today, turn on the simulated home in Settings → Smart home. It is off by
+default and clearly labelled, so nobody mistakes a pretend lamp for their own.
+
+Deliberately **not** in scope yet: motion detection and gesture recognition. The architecture
+has extension points for both; neither has a speculative implementation.
 
 ## Building
 
@@ -255,7 +288,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 212 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 274 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```
@@ -282,3 +315,7 @@ code path for audio at all.
 The microphone is opened only while detection is running, by exactly one class. The
 detector's diagnostics report levels and counts, never samples, and a `TriggerEvent`
 carries only the gap between the two claps.
+
+Connecting a smart home does not change any of that. Nothing about the sound is sent
+anywhere — a device command carries a device id and a verb, and only when a rule fires.
+Nothing is linked until you connect it, and disconnecting drops the app's authorisation.

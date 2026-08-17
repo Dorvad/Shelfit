@@ -35,6 +35,7 @@ SENSOR  ->  TRIGGER DETECTOR  ->  TRIGGER EVENT  ->  RULE  ->  ACTION EXECUTOR
 | ActionExecutor | `core/action/ActionExecutor.kt` | Performs one family of actions |
 | ActionDispatcher | `core/action/ActionDispatcher.kt` | Routes an action to the executor that accepts it |
 | RuleRepository | `data/RuleRepository.kt` | Persists the user's rules. The only thing the rule layer reads |
+| SmartHomeClient | `core/smarthome/SmartHomeClient.kt` | **The provider seam.** A vendor SDK appears in one implementation and nowhere else |
 
 Everything under `core/` is plain Kotlin with no Android imports, so it is fully
 unit-testable on the JVM. Android-specific implementations live in `platform/`.
@@ -211,9 +212,60 @@ detector to know about a rule, the thing you actually want belongs in
 forgetting step 3 is a crash on your machine rather than a rule that silently does
 nothing on a user's.
 
-Actions have no per-rule parameters yet. When one needs them — a smart-home action naming
-a device — `ActionKind` grows a factory, the editor grows fields, and `RuleCodec` grows a
-parameters field. Do not build that machinery before something needs it.
+An action that needs per-rule configuration implements `Action.parameters` and gives its
+`ActionKind` a factory, as `SmartHomeDeviceAction` does. **The action owns both halves of its
+own encoding** — `parameters` and `fromParameters` — so neither `RuleCodec` nor the rule
+editor knows its keys. Set `requiresConfiguration` so the editor refuses to save a rule that
+would fire and do nothing.
+
+`RuleCodec` is at `v2`. It still reads `v1` records, and any future field must keep doing the
+equivalent: a user who has tuned their automations should never lose them to an app update.
+
+### The smart-home layer
+
+One interface, `core/smarthome/SmartHomeClient.kt`, is the entire contract a provider has
+to satisfy. **A vendor SDK may appear in exactly one implementation of it and nowhere
+else.** That is what keeps the audio pipeline, the rule engine and the UI free of vendor
+types, and it is enforced by `PipelineBoundaryTest`.
+
+| Type | Where | Responsibility |
+| --- | --- | --- |
+| `SmartHome.kt` | `core/smarthome/` | The app's own vocabulary: structure, device, command, failure, state |
+| `SmartHomeClient` | `core/smarthome/` | The seam. Every method returns a value; expected conditions are never exceptions |
+| `SmartHomeDirectory` | `core/smarthome/` | The chosen home's device list, shared by the connect screen and the rule editor |
+| `SmartHomeDeviceAction` | `core/action/Action.kt` | Device ids plus a verb. No provider type, no network |
+| `SmartHomeActionExecutor` | `core/action/` | Turns the action into commands. In `core/` because it needs no Android |
+| `GoogleHomeClient` | `platform/smarthome/` | Where the Home APIs SDK goes. **Currently reports `NotConfigured`** |
+| `SimulatedSmartHomeClient` | `platform/smarthome/` | A pretend home for development. Off by default |
+| `SelectableSmartHomeClient` | `platform/smarthome/` | Routes to whichever the developer setting names |
+
+**The Google Home APIs Android SDK is not in this repository and did not resolve from
+Google's Maven or Maven Central.** `GoogleHomeClient` is therefore deliberately empty, with
+`TODO(home-sdk)` on each member describing what it must produce. Do not fill it in with
+guessed coordinates, classes or method names — check Google's own current documentation and
+implement against what is actually there. Everything on this side of the seam is finished
+and tested without it.
+
+Rules a provider implementation must keep:
+
+- **Never throw for an expected condition.** No network, withdrawn consent, an unplugged
+  lamp — all of those are `SmartHomeFailure` values. An exception here reaches a foreground
+  service that has to stay alive.
+- **One result per requested device**, whatever happened. A missing entry is counted as a
+  success by the executor's arithmetic.
+- **Only lights and outlets are switchable.** Anything else is `DeviceKind.UNSUPPORTED` —
+  listed so the user can see it was found, never operated.
+- **Toggle reads before it writes.** Fail the device with `DEVICE_STATE_UNKNOWN` rather than
+  guessing a direction.
+
+`ActionResult.Partial` exists because one action can span several devices: "2 of 3 lamps
+switched" is neither success nor failure, and collapsing it into either would hide a problem
+or overstate one.
+
+If the Home APIs later offer server-side automations for groups of actions,
+`SmartHomeClient.execute` is already shaped for it — it takes the whole target list and
+returns one report, so that becomes a change inside one file. Direct per-device control is
+the right first implementation because its failures are individually attributable.
 
 ### Non-negotiables
 
@@ -228,6 +280,9 @@ parameters field. Do not build that machinery before something needs it.
 - **The coordinator must be collecting before events flow.** `TriggerEngine.events` has
   no replay, so an event emitted with nothing listening is dropped. `AppContainer` starts
   the coordinator in its initialiser for exactly this reason — do not make it lazy.
+- **A vendor smart-home SDK lives in one file.** Behind `SmartHomeClient`, in
+  `platform/smarthome/`. Nothing in `core/`, `trigger/`, `ui/` or `service/` may import one.
+  Enforced by test.
 
 ## Privacy principles
 
@@ -343,19 +398,22 @@ bugs, and the health screen exists to make each one a single tap:
 
 ## Current state
 
-Stage 4, partly. The trigger → rule → action pipeline is complete and user-editable with
-local actions; Google Home is not started. Sensor Mode runs double clap detection in a
-foreground service, so the screen can be off.
+Stage 6. The trigger → rule → action pipeline is complete and user-editable, Sensor Mode runs
+double clap detection in a foreground service so the screen can be off, and the smart-home
+action exists end to end **except for the provider itself**.
 
-Three local actions exist: vibrate, show a notification, write to the log. All run
-entirely on the device. `VibrateAction` is local feedback and the
-only action that exists; Google Home, motion and gesture recognition are later
-stages with extension points but no implementations.
+Four actions: vibrate, show a notification, write to the log — all entirely local — and
+switch smart-home devices. The last one is fully built and tested against
+`SmartHomeClient`; what is missing is a `SmartHomeClient` that talks to Google, because the
+SDK is not obtainable from this repository. Turn on the simulated home in
+Settings → Smart home to exercise the flow. Camera, gesture, light and movement triggers
+remain later stages with extension points and no implementations.
 
-Screens: dashboard, settings, `ui/rules` — the rule editor — `ui/health` — setup and
-health checks — `ui/calibration` — the guided flow — and `ui/claplab`,
-a developer screen showing live level, the tracked background, the adaptive gate, the
-thresholds in force, rejection reasons and the event log.
+Screens: dashboard, settings, `ui/rules` — the rule editor, including the device picker —
+`ui/smarthome` — connect, choose a home, see what can be switched — `ui/health` — setup and
+health checks — `ui/calibration` — the guided flow — and `ui/claplab`, a developer screen
+showing live level, the tracked background, the adaptive gate, the thresholds in force,
+rejection reasons and the event log.
 
 Sensitivity is exposed to users as **Low / Normal / High**; numeric thresholds are
 read-only on the developer screen. Do not put raw scalars in the settings screen —
@@ -375,6 +433,12 @@ making deliberately, not by accident.
 **Known limitation.** In a room whose noise floor approaches clap level, no threshold
 works. Calibration reports this as poor headroom, or fails outright with advice,
 rather than shipping a configuration that cannot succeed.
+
+**Known limitation.** No real smart home can be reached. `GoogleHomeClient` reports
+`NotConfigured`, so a smart-home automation is saveable and reports honestly but switches
+nothing until the Home APIs SDK is added and that class implemented. The user-facing text says
+so rather than failing mysteriously. See `docs/google-home-setup.md` for the manual account
+and project work that has to happen first.
 
 Do not build ahead of the current stage. Extension points, yes; speculative
 features, no.
