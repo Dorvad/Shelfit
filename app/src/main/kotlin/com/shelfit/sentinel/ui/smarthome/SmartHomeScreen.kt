@@ -339,7 +339,8 @@ private fun TuyaCard(
     SectionCard("Tuya keys") {
         if (uiState.tuyaConfigured) {
             Text(
-                text = "Keys are saved for ${uiState.tuyaRegion.label}.",
+                text = "Keys are saved for ${uiState.tuyaRegion.label} " +
+                    "(${uiState.tuyaRegion.code}).",
                 style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedButton(onClick = onClearTuya, modifier = Modifier.fillMaxWidth()) {
@@ -388,7 +389,9 @@ private fun TuyaCard(
                 FilterChip(
                     selected = option == region,
                     onClick = { region = option },
-                    label = { Text(option.label) },
+                    // The code is shown too, so it can be matched against the Tuya console
+                    // and against tinytuya, both of which name regions that way.
+                    label = { Text("${option.label} (${option.code})") },
                 )
             }
         }

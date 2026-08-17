@@ -138,6 +138,10 @@ a cheap plug you are willing to lose, and a bad one for something you are not.
 
 ## Recommended order
 
+Each step below is written out in full, with the exact prompts and gotchas, in
+[`runbook.md`](runbook.md).
+
+
 1. **Run the local scan** in the app. Note the protocol versions. Free, instant, no account.
 2. **Do the cloud setup once** — `docs/tuya-setup.md`, about twenty minutes. This gives you
    working automations *today* via the cloud, and it is the only source of local keys.

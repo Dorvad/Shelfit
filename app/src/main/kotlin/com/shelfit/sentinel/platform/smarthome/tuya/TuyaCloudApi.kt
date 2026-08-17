@@ -10,12 +10,26 @@ import java.net.URL
 import java.net.UnknownHostException
 import javax.net.ssl.HttpsURLConnection
 
-/** Which Tuya data centre the project lives in. Shown in the console beside the Access ID. */
-enum class TuyaRegion(val label: String, val endpoint: String) {
-    CENTRAL_EUROPE("Central Europe", "https://openapi.tuyaeu.com"),
-    WESTERN_AMERICA("Western America", "https://openapi.tuyaus.com"),
-    CHINA("China", "https://openapi.tuyacn.com"),
-    INDIA("India", "https://openapi.tuyain.com"),
+/**
+ * Which Tuya data centre the project lives in. Shown in the console beside the Access ID.
+ *
+ * All seven Tuya operates, because a missing one is not a missing feature — it is a user who
+ * cannot connect at all, and whose symptom is an authorisation error indistinguishable from a
+ * mistyped secret. [code] is the identifier `tinytuya` and Tuya's own tooling use, so a user
+ * following either can match their region to the right entry here without guessing.
+ */
+enum class TuyaRegion(
+    val label: String,
+    val code: String,
+    val endpoint: String,
+) {
+    CENTRAL_EUROPE("Central Europe", "eu", "https://openapi.tuyaeu.com"),
+    WESTERN_EUROPE("Western Europe", "eu-w", "https://openapi-weaz.tuyaeu.com"),
+    WESTERN_AMERICA("Western America", "us", "https://openapi.tuyaus.com"),
+    EASTERN_AMERICA("Eastern America", "us-e", "https://openapi-ueaz.tuyaus.com"),
+    CHINA("China", "cn", "https://openapi.tuyacn.com"),
+    INDIA("India", "in", "https://openapi.tuyain.com"),
+    SINGAPORE("Singapore", "sg", "https://openapi-sg.iotbing.com"),
     ;
 
     companion object {

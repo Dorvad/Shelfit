@@ -48,7 +48,7 @@ What exists:
 - A smart-home action: choose devices, choose on/off/toggle, get per-device results
   including partial success — working against Tuya, with three providers behind one interface
 - Passive LAN discovery of Tuya devices — no account, nothing sent, listens only
-- 306 unit tests, including synthetic speech, music, doors, table knocks, changing
+- 311 unit tests, including synthetic speech, music, doors, table knocks, changing
   room noise, rapid transient bursts, simulated microphone outages, the full
   clap → rule → executor path, every smart-home failure condition, the Tuya request
   signature, and LAN discovery packets in every frame format
@@ -297,6 +297,12 @@ per-device local key.
 Deliberately **not** in scope yet: motion detection and gesture recognition. The architecture
 has extension points for both; neither has a speculative implementation.
 
+## Setting it up on a phone
+
+[**`docs/runbook.md`**](docs/runbook.md) is the whole path from a fresh clone to a lamp that
+switches when you clap: installing the app, preparing the network, scanning for devices, the
+Tuya cloud project, and collecting the local keys. Roughly an hour, none of it paid.
+
 ## Building
 
 Requires JDK 17+ and the Android SDK (platform 37, build-tools 36+). Point the
@@ -305,7 +311,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 306 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 311 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```
