@@ -7,26 +7,9 @@ import com.shelfit.sentinel.core.trigger.TriggerConfiguration
 import com.shelfit.sentinel.core.trigger.TriggerId
 
 /**
- * Two claps in quick succession, heard through the microphone.
- *
- * @param sensitivity 0f..1f. Higher values react to quieter claps and produce more
- *   false positives. Mapped to an amplitude threshold by the detector.
- * @param minGapMillis a second peak sooner than this is treated as an echo of the
- *   first, not a second clap.
- * @param maxGapMillis a second peak later than this starts a new pair instead of
- *   completing the current one.
- * @param cooldownMillis quiet period after a detection, so one pair of claps is
- *   never reported twice.
+ * Metadata for [DoubleClapDetector]: two claps in quick succession, heard through
+ * the microphone. Tuning lives in [DoubleClapConfiguration].
  */
-data class DoubleClapConfiguration(
-    override val enabled: Boolean = true,
-    val sensitivity: Float = 0.5f,
-    val minGapMillis: Long = 120L,
-    val maxGapMillis: Long = 800L,
-    val cooldownMillis: Long = 1_500L,
-) : TriggerConfiguration
-
-/** Metadata for [DoubleClapDetector]. */
 object DoubleClapTrigger : Trigger {
     override val id: TriggerId = TriggerId.DoubleClap
     override val displayName: String = "Double clap"

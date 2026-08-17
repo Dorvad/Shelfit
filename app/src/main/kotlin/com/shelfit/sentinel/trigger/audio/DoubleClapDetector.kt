@@ -1,5 +1,9 @@
 package com.shelfit.sentinel.trigger.audio
 
+import android.Manifest
+import com.shelfit.sentinel.core.MonotonicClock
+import com.shelfit.sentinel.core.audio.AudioInput
+import com.shelfit.sentinel.core.audio.AudioInputUnavailableException
 import com.shelfit.sentinel.core.sensor.SensorAvailability
 import com.shelfit.sentinel.core.sensor.SensorKind
 import com.shelfit.sentinel.core.sensor.SensorStatusProvider
@@ -13,39 +17,40 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onCompletion
 
 /**
- * Detector for [DoubleClapTrigger].
+ * Hears two claps and reports one [TriggerEvent].
  *
- * **Stage 1 scope.** The lifecycle is real — preflight checks, state reporting,
- * and release-on-cancel all work — but no audio is captured yet, so no
- * [TriggerEvent] is ever emitted and the state settles on
- * [TriggerState.Reason.NOT_IMPLEMENTED]. The dashboard reports that honestly
- * rather than claiming to listen.
+ * Owns no signal processing itself — it wires together four pieces that each do one
+ * job, so the analysis can be tested without a microphone and the microphone can be
+ * swapped without touching the analysis:
  *
- * Stage 2 replaces the body of [events] with microphone capture. The intended
- * shape, which the surrounding architecture already supports:
+ * ```
+ * AudioInput -> ClapFeatureExtractor -> ClapCandidateDetector -> DoubleClapStateMachine
+ *   PCM             measurements            "that was a clap"        "that was two"
+ * ```
  *
- *  1. Open an `AudioRecord` on `MediaRecorder.AudioSource.UNPROCESSED` (falling
- *     back to `MIC`) at the lowest workable sample rate — clap onsets are
- *     broadband, so 16 kHz mono is ample and cheap.
- *  2. Compute short-window RMS energy per buffer. No FFT unless false positives
- *     demand it; energy onset detection is far kinder to the battery.
- *  3. Treat a sharp rise above the [DoubleClapConfiguration.sensitivity]-derived
- *     threshold as a peak; emit a [TriggerEvent] when two peaks fall
- *     [DoubleClapConfiguration.minGapMillis]..[DoubleClapConfiguration.maxGapMillis]
- *     apart, then stay quiet for [DoubleClapConfiguration.cooldownMillis].
- *  4. Close the `AudioRecord` in a `finally` block. Because [events] is cold and
- *     collected by [com.shelfit.sentinel.core.trigger.TriggerEngine], cancelling
- *     the engine releases the microphone.
+ * **Privacy.** Frames are reduced to a handful of numbers and dropped; nothing is
+ * written to disk, cached, or sent anywhere. [ClapDiagnostics] publishes levels and
+ * counts, never samples, and [TriggerEvent.detail] carries only the gap between the
+ * two claps.
  *
- * Buffers stay inside this class: only the conclusion leaves. Nothing is written
- * to disk.
+ * **Timing.** Analysis runs on the capture timeline — sample counts, not a clock —
+ * so detection is unaffected by scheduling jitter. Only the emitted event is stamped
+ * with [MonotonicClock], because the rule layer compares that against other
+ * triggers.
+ *
+ * **Lifecycle.** All per-session state lives inside the [events] flow, so two
+ * collections never share a state machine, and cancelling the flow tears down the
+ * pipeline and releases the microphone.
  */
 class DoubleClapDetector(
+    private val audioInput: AudioInput,
     private val sensorStatus: SensorStatusProvider,
+    private val clock: MonotonicClock,
 ) : TriggerDetector {
 
     override val trigger: Trigger = DoubleClapTrigger
@@ -53,41 +58,159 @@ class DoubleClapDetector(
     private val _state = MutableStateFlow<TriggerState>(TriggerState.Idle)
     override val state: StateFlow<TriggerState> = _state.asStateFlow()
 
+    private val _diagnostics = MutableStateFlow(ClapDiagnostics())
+
+    /** Audio-only live view, consumed by the detector test screen. */
+    val diagnostics: StateFlow<ClapDiagnostics> = _diagnostics.asStateFlow()
+
     override fun events(configuration: TriggerConfiguration): Flow<TriggerEvent> =
-        flow<TriggerEvent> {
+        flow {
             _state.value = TriggerState.Starting
 
-            // Narrow to this detector's own configuration type; fall back rather
-            // than crash if the engine is handed something unexpected.
-            @Suppress("UNUSED_VARIABLE")
             val config = configuration as? DoubleClapConfiguration
                 ?: DoubleClapTrigger.defaultConfiguration as DoubleClapConfiguration
 
-            val microphone = sensorStatus.statusOf(SensorKind.MICROPHONE)
-            when (microphone.availability) {
-                SensorAvailability.UNSUPPORTED -> {
-                    _state.value = TriggerState.missingSensor(SensorKind.MICROPHONE)
-                    awaitCancellation()
+            if (!preflight()) awaitCancellation()
+
+            val profile = config.effectiveProfile
+            val extractor = ClapFeatureExtractor(config.audio, profile)
+            val candidates = ClapCandidateDetector(config.audio, profile)
+            val gesture = DoubleClapStateMachine(config.timing)
+            val session = SessionTotals()
+
+            _diagnostics.value = ClapDiagnostics(listening = true)
+            _state.value = TriggerState.Active
+
+            audioInput.frames(config.audio).collect { frame ->
+                val features = extractor.extract(frame)
+                gesture.advanceTo(features.timestampMillis)
+
+                var event: TriggerEvent? = null
+                var significant = false
+
+                when (val detection = candidates.onFrame(features)) {
+                    ClapDetection.None -> Unit
+
+                    is ClapDetection.Rejected -> {
+                        session.lastRejection = detection.reason
+                        significant = true
+                    }
+
+                    is ClapDetection.Candidate -> {
+                        session.candidateCount++
+                        session.lastCandidateAtMillis = detection.clap.onsetMillis
+                        session.lastCandidateConfidence = detection.clap.confidence
+                        session.lastRejection = null
+                        significant = true
+
+                        val outcome = gesture.onClapCandidate(detection.clap)
+                        if (outcome is DoubleClapOutcome.DoubleClapDetected) {
+                            session.detectionCount++
+                            session.lastGapMillis = outcome.gapMillis
+                            session.lastDetectionConfidence = outcome.confidence
+                            event = TriggerEvent(
+                                triggerId = trigger.id,
+                                elapsedRealtimeMillis = clock.elapsedMillis(),
+                                confidence = outcome.confidence,
+                                detail = mapOf(GAP_DETAIL_KEY to outcome.gapMillis.toString()),
+                            )
+                        }
+                    }
                 }
 
-                SensorAvailability.PERMISSION_REQUIRED -> {
-                    _state.value = TriggerState.missingPermission(
-                        android.Manifest.permission.RECORD_AUDIO,
-                    )
-                    awaitCancellation()
-                }
+                publishDiagnostics(features, gesture.phase, session, significant)
 
-                SensorAvailability.AVAILABLE -> {
-                    _state.value = TriggerState.Unavailable(
-                        reason = TriggerState.Reason.NOT_IMPLEMENTED,
-                        message = "Clap detection arrives in the next stage",
-                    )
-                    // Hold the pipeline open so start/stop behaves as it will once
-                    // audio capture lands here.
-                    awaitCancellation()
+                event?.let { emit(it) }
+            }
+        }
+            .catch { error ->
+                _state.value = TriggerState.Failed(describe(error))
+            }
+            .onCompletion {
+                _diagnostics.value = ClapDiagnostics()
+                // A failure is worth leaving on screen; anything else is just a stop.
+                if (_state.value !is TriggerState.Failed) {
+                    _state.value = TriggerState.Idle
                 }
             }
-        }.onCompletion {
-            _state.value = TriggerState.Idle
+
+    /** Returns true when capture may proceed; otherwise sets the reason on [state]. */
+    private fun preflight(): Boolean {
+        val microphone = sensorStatus.statusOf(SensorKind.MICROPHONE)
+        return when (microphone.availability) {
+            SensorAvailability.UNSUPPORTED -> {
+                _state.value = TriggerState.missingSensor(SensorKind.MICROPHONE)
+                false
+            }
+
+            SensorAvailability.PERMISSION_REQUIRED -> {
+                _state.value = TriggerState.missingPermission(Manifest.permission.RECORD_AUDIO)
+                false
+            }
+
+            SensorAvailability.AVAILABLE -> true
         }
+    }
+
+    /**
+     * Publishes to [diagnostics].
+     *
+     * Level updates are skipped entirely when nothing is observing, and throttled
+     * when something is: 60 frames a second of recomposition would cost more battery
+     * than the detection itself. Claps and rejections always publish — they are rare
+     * and they are the point.
+     */
+    private fun publishDiagnostics(
+        features: AudioFrameFeatures,
+        phase: DoubleClapPhase,
+        session: SessionTotals,
+        significant: Boolean,
+    ) {
+        val observed = _diagnostics.subscriptionCount.value > 0
+        if (!observed && !significant) return
+
+        val dueForLevelUpdate =
+            features.timestampMillis - session.lastPublishMillis >= LEVEL_PUBLISH_INTERVAL_MILLIS
+        if (!significant && !dueForLevelUpdate) return
+
+        session.lastPublishMillis = features.timestampMillis
+
+        _diagnostics.value = ClapDiagnostics(
+            listening = true,
+            level = features.rms,
+            peak = features.peak,
+            noiseFloor = features.noiseFloor,
+            phase = phase,
+            candidateCount = session.candidateCount,
+            detectionCount = session.detectionCount,
+            lastCandidateAtMillis = session.lastCandidateAtMillis,
+            lastCandidateConfidence = session.lastCandidateConfidence,
+            lastRejection = session.lastRejection,
+            lastGapMillis = session.lastGapMillis,
+            lastDetectionConfidence = session.lastDetectionConfidence,
+            timelineMillis = features.timestampMillis,
+        )
+    }
+
+    private fun describe(error: Throwable): String = when (error) {
+        is AudioInputUnavailableException -> error.message ?: "Microphone unavailable"
+        else -> error.message ?: error::class.simpleName ?: "Audio capture failed"
+    }
+
+    /** Per-collection counters. Never shared between sessions. */
+    private class SessionTotals {
+        var candidateCount = 0
+        var detectionCount = 0
+        var lastCandidateAtMillis: Long? = null
+        var lastCandidateConfidence: Float? = null
+        var lastRejection: ClapRejection? = null
+        var lastGapMillis: Long? = null
+        var lastDetectionConfidence: Float? = null
+        var lastPublishMillis = Long.MIN_VALUE
+    }
+
+    private companion object {
+        const val LEVEL_PUBLISH_INTERVAL_MILLIS = 64L
+        const val GAP_DETAIL_KEY = "gapMillis"
+    }
 }

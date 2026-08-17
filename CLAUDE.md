@@ -37,6 +37,43 @@ SENSOR  ->  TRIGGER DETECTOR  ->  TRIGGER EVENT  ->  RULE  ->  ACTION EXECUTOR
 Everything under `core/` is plain Kotlin with no Android imports, so it is fully
 unit-testable on the JVM. Android-specific implementations live in `platform/`.
 
+### The audio pipeline
+
+`DoubleClapDetector` owns no signal processing itself. It wires four pieces, each
+replaceable and each testable alone:
+
+```
+AudioInput -> ClapFeatureExtractor -> ClapCandidateDetector -> DoubleClapStateMachine
+   PCM            measurements           "that was a clap"        "that was two"
+```
+
+| Type | Where | Notes |
+| --- | --- | --- |
+| `AudioInput` | `core/audio/AudioInput.kt` | Cold `Flow<AudioFrame>`. Interface, so tests feed synthetic PCM |
+| `AudioRecordInput` | `platform/audio/` | **The only class that opens the microphone** |
+| `ClapFeatureExtractor` | `trigger/audio/` | PCM to scalars; tracks the noise floor. Pure |
+| `ClapCandidateDetector` | `trigger/audio/` | Onset gates, then decay verification. Pure |
+| `DoubleClapStateMachine` | `trigger/audio/` | Gesture timing. Pure, no clock inside |
+| `ClapDiagnostics` | `trigger/audio/` | Audio-only live view for the test screen |
+
+Detection runs on the **capture timeline** — timestamps derived from sample counts,
+not a clock — so it is immune to scheduling jitter and deterministic under test.
+`MonotonicClock` is used only to stamp the emitted `TriggerEvent`, because the rule
+layer compares that against other triggers.
+
+All per-session state lives inside the `events()` flow rather than in detector
+fields, so two collections never share a state machine.
+
+Every detection threshold lives in `DoubleClapConfiguration` (with `ClapProfile` and
+`DoubleClapTiming`). **Do not introduce a detection constant anywhere else** —
+retuning has to be possible from one file. `sensitivity` scales only the loudness
+gates; the character gates define what a clap *is* and loosening them just admits
+doors and speech.
+
+`ClapDiagnostics` is a deliberate exception to the trigger abstraction: an
+audio-only side channel for the test screen. Do not widen `TriggerState` or
+`TriggerEvent` with sensor-specific fields to serve one screen.
+
 Wiring is hand-rolled in `AppContainer.kt` — no DI framework. **`AppContainer` is
 the extension point**: register a detector in `triggerRegistry`, register an
 executor in `actionDispatcher`. Nothing else changes.
@@ -120,12 +157,40 @@ Unit tests use `kotlinx-coroutines-test`; fakes live in
 `app/src/test/kotlin/com/shelfit/sentinel/core/Fakes.kt`. There are no
 instrumented tests yet.
 
+Audio is tested without a microphone. `SyntheticAudio.kt` generates seeded waveforms
+for claps, speech, music, door thuds and table knocks, and replays them through the
+`AudioInput` interface. Two levels matter:
+
+- `ClapDiscriminationTest` asserts **which gate** rejects each everyday sound. An
+  end-to-end "emits nothing" assertion would also pass if detection were broken, so
+  add cases here when changing a threshold.
+- `DoubleClapStateMachineTest` covers gesture timing with synthetic claps at exact
+  instants — echoes, expiry, bursts, cooldown.
+
+Synthetic waveforms validate the logic, not real-world accuracy. Anything about
+sensitivity in a real room has to be measured on a device.
+
 ## Current state
 
-Stage 1: architecture, app shell, dashboard, settings, navigation.
-`DoubleClapDetector` implements the full lifecycle but captures no audio — it
-reports `TriggerState.Reason.NOT_IMPLEMENTED` and emits nothing. The dashboard
-says so rather than pretending to listen. See `README.md` for the stage plan.
+Stage 2. Double clap detection works end to end on device: microphone to
+`TriggerEvent` to rule to a vibration. `VibrateAction` is local feedback and the
+only action that exists; Google Home, motion and gesture recognition are later
+stages with extension points but no implementations.
+
+Screens: dashboard, settings, and `ui/claplab` — a developer screen showing live
+level, the tracked background, accepted claps, rejection reasons and the measured
+gap, for tuning against a real room.
+
+**Known limitation.** Android suspends microphone access for backgrounded apps, so
+detection only runs while the app is in the foreground. `AudioRecord` stays open and
+returns silence rather than failing. Always-on operation needs the foreground service
+planned for stage 3; until then, leaving detection running in the background costs
+battery and detects nothing.
+
+**Known limitation.** A dry, broadband impact — a hard strike on a table — clears
+every feature gate and is accepted as a clap. This is pinned by a test in
+`ClapDiscriminationTest` rather than hidden. Separating the two needs timbre
+modelling, which is where a classifier would earn its place.
 
 Do not build ahead of the current stage. Extension points, yes; speculative
 features, no.

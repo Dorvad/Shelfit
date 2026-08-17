@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,26 +38,32 @@ import com.shelfit.sentinel.core.sensor.SensorKind
 import com.shelfit.sentinel.core.sensor.SensorStatus
 import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.core.trigger.TriggerState
+import com.shelfit.sentinel.ui.permission.MicrophonePermissionState
+import com.shelfit.sentinel.ui.permission.rememberMicrophonePermissionState
 import com.shelfit.sentinel.ui.theme.SentinelTheme
 
 @Composable
 fun DashboardRoute(
     container: AppContainer,
     onOpenSettings: () -> Unit,
+    onOpenClapLab: () -> Unit,
     viewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.factory(container)),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val permission = rememberMicrophonePermissionState()
 
     // Permissions can be changed in system Settings while the app is backgrounded.
-    LifecycleResumeEffect(Unit) {
+    LifecycleResumeEffect(permission.granted) {
         viewModel.refreshSensorStatus()
         onPauseOrDispose { }
     }
 
     DashboardScreen(
         uiState = uiState,
+        permission = permission,
         onToggleListening = viewModel::toggleListening,
         onOpenSettings = onOpenSettings,
+        onOpenClapLab = onOpenClapLab,
     )
 }
 
@@ -64,8 +71,10 @@ fun DashboardRoute(
 @Composable
 fun DashboardScreen(
     uiState: DashboardUiState,
+    permission: MicrophonePermissionState,
     onToggleListening: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenClapLab: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -89,6 +98,10 @@ fun DashboardScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (!permission.granted) {
+                MicrophonePermissionCard(permission)
+            }
+
             SensorStatusCard(uiState.sensors)
 
             uiState.triggers.forEach { trigger ->
@@ -97,8 +110,50 @@ fun DashboardScreen(
 
             ListeningControl(
                 isRunning = uiState.isRunning,
+                enabled = permission.granted,
                 onToggleListening = onToggleListening,
             )
+
+            TextButton(
+                onClick = onOpenClapLab,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Open clap detector test") }
+        }
+    }
+}
+
+/**
+ * Asks for the microphone at the point the user can see why it is needed, rather
+ * than on first launch.
+ */
+@Composable
+private fun MicrophonePermissionCard(permission: MicrophonePermissionState) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Microphone access is required to hear claps",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                text = "Audio is analysed on this device and never recorded or sent " +
+                    "anywhere.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            if (permission.deniedAfterRequest) {
+                Button(onClick = permission.openAppSettings) { Text("Open app settings") }
+            } else {
+                Button(onClick = permission.request) { Text("Grant microphone access") }
+            }
         }
     }
 }
@@ -144,7 +199,11 @@ private fun TriggerCard(trigger: TriggerRowUi) {
 }
 
 @Composable
-private fun ListeningControl(isRunning: Boolean, onToggleListening: () -> Unit) {
+private fun ListeningControl(
+    isRunning: Boolean,
+    enabled: Boolean,
+    onToggleListening: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -155,13 +214,18 @@ private fun ListeningControl(isRunning: Boolean, onToggleListening: () -> Unit) 
                 Text("Stop listening")
             }
         } else {
-            Button(onClick = onToggleListening, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = onToggleListening,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text("Start listening")
             }
         }
         Text(
-            text = "Clap detection is not built yet. Starting the engine exercises the " +
-                "detector lifecycle only — no audio is captured.",
+            text = "Detection runs while the app is open. Android suspends microphone " +
+                "access for backgrounded apps, so always-on operation needs the " +
+                "foreground service planned for the next stage.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -254,12 +318,19 @@ private fun DashboardScreenPreview() {
                         name = "Double clap",
                         description = "Clap twice, quickly",
                         state = TriggerState.Idle,
-                        actionName = null,
+                        actionName = "Vibrate the phone",
                     ),
                 ),
             ),
+            permission = MicrophonePermissionState(
+                granted = false,
+                deniedAfterRequest = false,
+                request = {},
+                openAppSettings = {},
+            ),
             onToggleListening = {},
             onOpenSettings = {},
+            onOpenClapLab = {},
         )
     }
 }

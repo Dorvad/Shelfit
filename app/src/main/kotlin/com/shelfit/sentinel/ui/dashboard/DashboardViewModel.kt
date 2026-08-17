@@ -7,19 +7,12 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.shelfit.sentinel.AppContainer
 import com.shelfit.sentinel.core.sensor.SensorStatus
-import com.shelfit.sentinel.core.sensor.SensorStatusProvider
-import com.shelfit.sentinel.core.trigger.TriggerEngine
 import com.shelfit.sentinel.core.trigger.TriggerId
-import com.shelfit.sentinel.core.trigger.TriggerRegistry
 import com.shelfit.sentinel.core.trigger.TriggerState
-import com.shelfit.sentinel.data.RuleRepository
-import com.shelfit.sentinel.data.SettingsRepository
-import com.shelfit.sentinel.data.triggerConfigurations
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -46,13 +39,9 @@ data class DashboardUiState(
  * future change needs microphone or camera code in here, it belongs in a
  * [com.shelfit.sentinel.core.trigger.TriggerDetector] instead.
  */
-class DashboardViewModel(
-    private val engine: TriggerEngine,
-    private val registry: TriggerRegistry,
-    private val ruleRepository: RuleRepository,
-    private val settingsRepository: SettingsRepository,
-    private val sensorStatusProvider: SensorStatusProvider,
-) : ViewModel() {
+class DashboardViewModel(private val container: AppContainer) : ViewModel() {
+
+    private val registry = container.triggerRegistry
 
     /** Only the sensors some registered trigger actually needs. Grows by itself. */
     private val relevantSensors = registry.triggers.flatMap { it.requiredSensors }.toSet()
@@ -60,9 +49,9 @@ class DashboardViewModel(
     private val sensorSnapshot = MutableStateFlow(readSensorStatus())
 
     val uiState: StateFlow<DashboardUiState> = combine(
-        engine.isRunning,
-        engine.states,
-        ruleRepository.rules,
+        container.triggerEngine.isRunning,
+        container.triggerEngine.states,
+        container.ruleRepository.rules,
         sensorSnapshot,
     ) { isRunning, triggerStates, rules, sensors ->
         DashboardUiState(
@@ -94,34 +83,24 @@ class DashboardViewModel(
     }
 
     fun toggleListening() {
-        if (engine.isRunning.value) {
-            engine.stop()
-            refreshSensorStatus()
-            return
-        }
         viewModelScope.launch {
-            val settings = settingsRepository.settings.first()
-            engine.start(settings.triggerConfigurations())
+            if (container.triggerEngine.isRunning.value) {
+                container.stopDetection()
+            } else {
+                container.startDetection()
+            }
             refreshSensorStatus()
         }
     }
 
     private fun readSensorStatus(): List<SensorStatus> =
-        sensorStatusProvider.statusOf(relevantSensors)
+        container.sensorStatusProvider.statusOf(relevantSensors)
 
     companion object {
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
-            initializer {
-                DashboardViewModel(
-                    engine = container.triggerEngine,
-                    registry = container.triggerRegistry,
-                    ruleRepository = container.ruleRepository,
-                    settingsRepository = container.settingsRepository,
-                    sensorStatusProvider = container.sensorStatusProvider,
-                )
-            }
+            initializer { DashboardViewModel(container) }
         }
     }
 }

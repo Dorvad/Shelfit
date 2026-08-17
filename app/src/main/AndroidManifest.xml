@@ -2,11 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      Declared now because the double clap detector needs it in the next stage.
-      Nothing in this build opens the microphone; the permission is not requested
-      at runtime yet, and the dashboard reports it as "Permission required".
+      Used by DoubleClapDetector via AudioRecordInput, requested at runtime from the
+      dashboard and the detector test screen. Audio is analysed in memory and
+      discarded; nothing is recorded or uploaded.
     -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Local feedback on a confirmed detection. Install-time permission. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <uses-feature
         android:name="android.hardware.microphone"

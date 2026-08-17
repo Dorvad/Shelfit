@@ -21,6 +21,8 @@ data class SentinelSettings(
     val keepScreenOn: Boolean = false,
     val doubleClapEnabled: Boolean = true,
     val doubleClapSensitivity: Float = 0.5f,
+    /** Buzz on a confirmed detection. Local feedback, on by default. */
+    val hapticFeedbackEnabled: Boolean = true,
 )
 
 /**
@@ -62,6 +64,8 @@ class SettingsRepository(context: Context) {
                     ?: defaults.doubleClapEnabled,
                 doubleClapSensitivity = preferences[Keys.DoubleClapSensitivity]
                     ?: defaults.doubleClapSensitivity,
+                hapticFeedbackEnabled = preferences[Keys.HapticFeedbackEnabled]
+                    ?: defaults.hapticFeedbackEnabled,
             )
         }
 
@@ -72,6 +76,9 @@ class SettingsRepository(context: Context) {
     suspend fun setDoubleClapSensitivity(sensitivity: Float) =
         edit(Keys.DoubleClapSensitivity, sensitivity.coerceIn(0f, 1f))
 
+    suspend fun setHapticFeedbackEnabled(enabled: Boolean) =
+        edit(Keys.HapticFeedbackEnabled, enabled)
+
     private suspend fun <T> edit(key: Preferences.Key<T>, value: T) {
         dataStore.edit { preferences -> preferences[key] = value }
     }
@@ -80,5 +87,6 @@ class SettingsRepository(context: Context) {
         val KeepScreenOn = booleanPreferencesKey("keep_screen_on")
         val DoubleClapEnabled = booleanPreferencesKey("double_clap_enabled")
         val DoubleClapSensitivity = floatPreferencesKey("double_clap_sensitivity")
+        val HapticFeedbackEnabled = booleanPreferencesKey("haptic_feedback_enabled")
     }
 }

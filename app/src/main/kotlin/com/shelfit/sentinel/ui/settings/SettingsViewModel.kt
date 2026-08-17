@@ -35,6 +35,10 @@ class SettingsViewModel(
         settingsRepository.setDoubleClapSensitivity(sensitivity)
     }
 
+    fun setHapticFeedbackEnabled(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setHapticFeedbackEnabled(enabled)
+    }
+
     companion object {
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 

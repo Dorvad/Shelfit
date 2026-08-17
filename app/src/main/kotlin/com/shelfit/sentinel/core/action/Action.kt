@@ -23,3 +23,17 @@ data object LogAction : Action {
     override val type: String = "log"
     override val displayName: String = "Write to log"
 }
+
+/**
+ * Buzzes the device.
+ *
+ * Local feedback only — it confirms that a trigger reached the action layer without
+ * involving anything outside the phone. It is also the default rule's action until
+ * outward-facing actions exist, which makes the pipeline demonstrable end to end.
+ */
+data class VibrateAction(
+    val durationMillis: Long = 140L,
+) : Action {
+    override val type: String = "vibrate"
+    override val displayName: String = "Vibrate the phone"
+}

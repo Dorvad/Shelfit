@@ -19,6 +19,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -44,6 +47,7 @@ fun SettingsRoute(
         onKeepScreenOnChange = { viewModel.setKeepScreenOn(it) },
         onDoubleClapEnabledChange = { viewModel.setDoubleClapEnabled(it) },
         onDoubleClapSensitivityChange = { viewModel.setDoubleClapSensitivity(it) },
+        onHapticFeedbackChange = { viewModel.setHapticFeedbackEnabled(it) },
         onNavigateBack = onNavigateBack,
     )
 }
@@ -55,6 +59,7 @@ fun SettingsScreen(
     onKeepScreenOnChange: (Boolean) -> Unit,
     onDoubleClapEnabledChange: (Boolean) -> Unit,
     onDoubleClapSensitivityChange: (Float) -> Unit,
+    onHapticFeedbackChange: (Boolean) -> Unit,
     onNavigateBack: () -> Unit,
 ) {
     Scaffold(
@@ -92,16 +97,29 @@ fun SettingsScreen(
                 Text("Sensitivity", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     text = "Higher values react to quieter claps and cause more " +
-                        "false positives.",
+                        "false positives. Takes effect the next time detection starts.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Tracked locally while dragging so a drag is one stored value rather
+                // than one per frame.
+                var pending by remember(settings.doubleClapSensitivity) {
+                    mutableFloatStateOf(settings.doubleClapSensitivity)
+                }
                 Slider(
-                    value = settings.doubleClapSensitivity,
-                    onValueChange = onDoubleClapSensitivityChange,
+                    value = pending,
+                    onValueChange = { pending = it },
+                    onValueChangeFinished = { onDoubleClapSensitivityChange(pending) },
                     valueRange = 0f..1f,
                 )
             }
+
+            SwitchRow(
+                title = "Vibrate on detection",
+                subtitle = "Local feedback when a double clap is confirmed",
+                checked = settings.hapticFeedbackEnabled,
+                onCheckedChange = onHapticFeedbackChange,
+            )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
@@ -169,6 +187,7 @@ private fun SettingsScreenPreview() {
             onKeepScreenOnChange = {},
             onDoubleClapEnabledChange = {},
             onDoubleClapSensitivityChange = {},
+            onHapticFeedbackChange = {},
             onNavigateBack = {},
         )
     }

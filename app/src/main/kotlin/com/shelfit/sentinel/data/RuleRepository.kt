@@ -1,5 +1,6 @@
 package com.shelfit.sentinel.data
 
+import com.shelfit.sentinel.core.action.VibrateAction
 import com.shelfit.sentinel.core.rule.AutomationRule
 import com.shelfit.sentinel.core.trigger.TriggerId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,12 +28,18 @@ class RuleRepository {
     }
 
     companion object {
-        /** The one rule that exists today. Its action is deliberately unset. */
+        /**
+         * The one rule that exists today.
+         *
+         * Its action is local feedback only — a buzz, nothing leaving the device —
+         * which is enough to prove a clap travelled the whole pipeline. Outward
+         * facing actions arrive in a later stage.
+         */
         val DEFAULT_DOUBLE_CLAP_RULE = AutomationRule(
             id = "rule.double_clap",
             name = "Double clap",
             triggerId = TriggerId.DoubleClap,
-            action = null,
+            action = VibrateAction(),
             cooldownMillis = 1_500L,
         )
     }
