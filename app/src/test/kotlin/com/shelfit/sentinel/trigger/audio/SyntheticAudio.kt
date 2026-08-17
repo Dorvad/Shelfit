@@ -31,9 +31,35 @@ class SyntheticSignal(
     private val random = Random(seed)
     private val samples = ArrayList<Float>()
 
-    /** Room tone only. */
+    /** Current room-tone level. Changed mid-signal by [room]. */
+    private var currentBackground = backgroundAmplitude
+
+    /**
+     * Changes the room noise for everything generated after this call, so a signal can
+     * model an environment that gets busier or falls quiet partway through.
+     */
+    fun room(amplitude: Float): SyntheticSignal = apply { currentBackground = amplitude }
+
+    /** Room tone only, at whatever level [room] last set. */
     fun silence(millis: Long): SyntheticSignal = apply {
         repeat(sampleCount(millis)) { samples += background() }
+    }
+
+    /**
+     * A run of clap-like impulses at a fixed rate — hammering, chopping, a bouncing
+     * ball, applause. Each one is individually indistinguishable from a clap; it is
+     * the rate that gives them away.
+     */
+    fun impulseTrain(
+        count: Int,
+        intervalMillis: Long,
+        amplitude: Float = 0.5f,
+        decayMillis: Float = 6f,
+    ): SyntheticSignal = apply {
+        repeat(count) {
+            clap(amplitude = amplitude, decayMillis = decayMillis, durationMillis = IMPULSE_MILLIS)
+            silence((intervalMillis - IMPULSE_MILLIS).coerceAtLeast(0L))
+        }
     }
 
     /**
@@ -136,7 +162,7 @@ class SyntheticSignal(
     private fun sampleCount(millis: Long): Int =
         (millis * config.sampleRateHz / MILLIS_PER_SECOND).toInt()
 
-    private fun background(): Float = noise() * backgroundAmplitude
+    private fun background(): Float = noise() * currentBackground
 
     private fun noise(): Float = random.nextFloat() * 2f - 1f
 
@@ -149,6 +175,7 @@ class SyntheticSignal(
         const val TWO_PI = 2.0 * PI
         const val SPEECH_HARMONICS = 14
         const val SYLLABLE_RATE_HZ = 4f
+        const val IMPULSE_MILLIS = 48L
     }
 }
 

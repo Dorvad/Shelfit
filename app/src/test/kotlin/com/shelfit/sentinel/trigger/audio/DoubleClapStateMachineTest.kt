@@ -113,6 +113,23 @@ class DoubleClapStateMachineTest {
     }
 
     @Test
+    fun `a triple clap yields one gesture, not two`() {
+        val machine = machine()
+
+        val outcomes = listOf(0L, 300L, 600L).map { machine.onClapCandidate(clap(it)) }
+
+        assertEquals(
+            "the first pair fires and the third clap lands in the cooldown",
+            1,
+            outcomes.count { it is DoubleClapOutcome.DoubleClapDetected },
+        )
+        assertEquals(
+            DoubleClapOutcome.Ignored(DoubleClapOutcome.Ignored.Reason.IN_COOLDOWN),
+            outcomes.last(),
+        )
+    }
+
+    @Test
     fun `a burst of claps yields exactly one gesture`() {
         val machine = machine()
         val outcomes = listOf(0L, 250L, 500L, 750L, 1_000L)

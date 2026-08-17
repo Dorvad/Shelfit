@@ -237,6 +237,25 @@ class DoubleClapDetectorTest {
     }
 
     @Test
+    fun `a triple clap yields a single event`() = runTest {
+        val input = signal()
+            .silence(WARM_UP_MILLIS)
+            .clap()
+            .silence(300L - CLAP_LENGTH_MILLIS)
+            .clap()
+            .silence(300L - CLAP_LENGTH_MILLIS)
+            .clap()
+            .silence(600L)
+            .toAudioInput()
+
+        assertEquals(
+            "three claps are one gesture plus a clap swallowed by the cooldown",
+            1,
+            detector(input).events(configuration).toList().size,
+        )
+    }
+
+    @Test
     fun `a burst of four claps yields a single event`() = runTest {
         val input = signal()
             .silence(WARM_UP_MILLIS)
@@ -289,19 +308,28 @@ class DoubleClapDetectorTest {
 
     @Test
     fun `raising sensitivity lets a fainter clap through`() = runTest {
+        // Peak lands between the High and Low peak gates, so sensitivity is the only
+        // thing deciding the outcome.
         fun scenario() = signal()
             .silence(WARM_UP_MILLIS)
-            .clap(amplitude = 0.05f)
+            .clap(amplitude = 0.10f)
             .silence(300L - CLAP_LENGTH_MILLIS)
-            .clap(amplitude = 0.05f)
+            .clap(amplitude = 0.10f)
             .silence(500L)
             .toAudioInput()
 
-        val strict = configuration.copy(sensitivity = 0.0f)
-        val permissive = configuration.copy(sensitivity = 1.0f)
+        val strict = configuration.copy(sensitivity = SensitivityLevel.LOW)
+        val permissive = configuration.copy(sensitivity = SensitivityLevel.HIGH)
 
-        assertTrue(detector(scenario()).events(strict).toList().isEmpty())
-        assertEquals(1, detector(scenario()).events(permissive).toList().size)
+        assertTrue(
+            "Low should demand a louder clap",
+            detector(scenario()).events(strict).toList().isEmpty(),
+        )
+        assertEquals(
+            "High should hear the same clap",
+            1,
+            detector(scenario()).events(permissive).toList().size,
+        )
     }
 
     /**

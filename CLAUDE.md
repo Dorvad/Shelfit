@@ -55,6 +55,9 @@ AudioInput -> ClapFeatureExtractor -> ClapCandidateDetector -> DoubleClapStateMa
 | `ClapCandidateDetector` | `trigger/audio/` | Onset gates, then decay verification. Pure |
 | `DoubleClapStateMachine` | `trigger/audio/` | Gesture timing. Pure, no clock inside |
 | `ClapDiagnostics` | `trigger/audio/` | Audio-only live view for the test screen |
+| `ClapCalibration` | `trigger/audio/` | Measurements from a calibration run, and the derivation that turns them into a `ClapProfile` |
+| `ClapCalibrator` | `trigger/audio/` | Runs the guided measurement over `AudioInput`. Cold flow of `CalibrationStage` |
+| `EventLog` | `core/diagnostics/` | Bounded, in-memory, metadata-only history |
 
 Detection runs on the **capture timeline** — timestamps derived from sample counts,
 not a clock — so it is immune to scheduling jitter and deterministic under test.
@@ -69,6 +72,45 @@ Every detection threshold lives in `DoubleClapConfiguration` (with `ClapProfile`
 retuning has to be possible from one file. `sensitivity` scales only the loudness
 gates; the character gates define what a clap *is* and loosening them just admits
 doors and speech.
+
+### Where a threshold comes from
+
+Precedence, lowest first:
+
+1. `ClapProfile()` defaults — generic, and wrong for most devices.
+2. `ClapCalibration.toProfile()` — replaces them with values measured on this device
+   in this room, when the user has calibrated.
+3. `SensitivityLevel` (Low/Normal/High) — scales the loudness gates on top.
+4. `ClapProfile.adaptiveMinPeak()` — raises the absolute peak gate at runtime as the
+   room gets busier, bounded by `adaptiveRangeUp`.
+
+`SettingsRepository.triggerConfigurations()` assembles 1–3; the detector applies 4 per
+frame. The developer screen displays the result read-only: the way to change a
+threshold is to recalibrate or move sensitivity, not to edit derived values behind the
+model's back.
+
+**Calibration stores measurements, not thresholds.** `ClapCalibration.toProfile()` is
+the single definition of how a room becomes a configuration, so improving the
+derivation later benefits everyone who has already calibrated. Do not persist the
+derived profile alongside the measurements.
+
+### Adaptive behaviour
+
+Two mechanisms, both about a room that changes rather than a sound in isolation:
+
+- **Adaptive peak gate.** Rises with the tracked ambient *peak*, bounded above by
+  `adaptiveRangeUp` and never falling below the calibrated value. It only ever rises:
+  a quieter room is already handled by `minAmbientRatio`, which becomes easier to
+  satisfy as the noise floor drops, so lowering the absolute gate too would buy
+  sensitivity nobody asked for and pay for it in false positives at 3am.
+- **Burst suppression.** More than `maxTransientsPerWindow` *clap-shaped* onsets
+  inside `transientWindowMillis` and onsets stop being trusted until the room settles.
+  Only clap-shaped onsets are counted — speech and music are already rejected by the
+  character gates, and letting them inflate the counter would make the reported
+  rejection reason less useful without changing the outcome.
+
+The allowance must stay above three: a triple clap is three onsets and must never be
+read as a burst.
 
 `ClapDiagnostics` is a deliberate exception to the trigger abstraction: an
 audio-only side channel for the test screen. Do not widen `TriggerState` or
@@ -114,6 +156,9 @@ These are product commitments, not preferences:
 - **Only requested sensors are opened**, only while listening is active.
 - **Logs and `TriggerEvent.detail` carry no sensor content** — trigger identity and
   confidence only.
+- **Calibration saves derived values only** — ambient level, clap peak levels,
+  transient durations, recommended thresholds. `EventLog` is metadata only and lives
+  in memory, never on disk, so there is no retention policy to get wrong.
 
 ## SDK levels
 
@@ -165,7 +210,12 @@ for claps, speech, music, door thuds and table knocks, and replays them through 
   end-to-end "emits nothing" assertion would also pass if detection were broken, so
   add cases here when changing a threshold.
 - `DoubleClapStateMachineTest` covers gesture timing with synthetic claps at exact
-  instants — echoes, expiry, bursts, cooldown.
+  instants — echoes, expiry, triples, bursts, cooldown.
+- `AdaptiveDetectionTest` uses `SyntheticSignal.room()` to change the environment
+  partway through a signal, and `impulseTrain()` for hammering and rattles.
+- `ClapCalibratorTest` round-trips: calibrate on one signal, then detect with the
+  derived profile. That property cannot be established by checking the arithmetic, so
+  add a round-trip case when changing the derivation.
 
 Synthetic waveforms validate the logic, not real-world accuracy. Anything about
 sensitivity in a real room has to be measured on a device.
@@ -177,9 +227,13 @@ Stage 2. Double clap detection works end to end on device: microphone to
 only action that exists; Google Home, motion and gesture recognition are later
 stages with extension points but no implementations.
 
-Screens: dashboard, settings, and `ui/claplab` — a developer screen showing live
-level, the tracked background, accepted claps, rejection reasons and the measured
-gap, for tuning against a real room.
+Screens: dashboard, settings, `ui/calibration` — the guided flow — and `ui/claplab`,
+a developer screen showing live level, the tracked background, the adaptive gate, the
+thresholds in force, rejection reasons and the event log.
+
+Sensitivity is exposed to users as **Low / Normal / High**; numeric thresholds are
+read-only on the developer screen. Do not put raw scalars in the settings screen —
+"0.63" tells nobody whether their claps will register.
 
 **Known limitation.** Android suspends microphone access for backgrounded apps, so
 detection only runs while the app is in the foreground. `AudioRecord` stays open and
@@ -191,6 +245,16 @@ battery and detects nothing.
 every feature gate and is accepted as a clap. This is pinned by a test in
 `ClapDiscriminationTest` rather than hidden. Separating the two needs timbre
 modelling, which is where a classifier would earn its place.
+
+**Known limitation.** Two impulses in clap timing are two impulses in clap timing.
+Regular hammering at roughly two to four strikes a second will fire once before burst
+suppression engages. Eliminating that would mean waiting to see whether a third
+impulse follows, which adds latency to every legitimate detection — a trade-off worth
+making deliberately, not by accident.
+
+**Known limitation.** In a room whose noise floor approaches clap level, no threshold
+works. Calibration reports this as poor headroom, or fails outright with advice,
+rather than shipping a configuration that cannot succeed.
 
 Do not build ahead of the current stage. Extension points, yes; speculative
 features, no.

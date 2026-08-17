@@ -2,16 +2,29 @@ package com.shelfit.sentinel.trigger.audio
 
 import com.shelfit.sentinel.core.audio.AudioCaptureConfig
 
-/** A single sound accepted as a clap. */
+/**
+ * A single sound accepted as a clap.
+ *
+ * Carries the measurements behind the decision as well as the decision itself, so
+ * calibration can derive thresholds from real claps and the test screen can show why
+ * a clap scored what it did.
+ *
+ * @param confidence heuristic, 0f..1f: 0.5f for a clap that exactly met every
+ *   threshold, rising towards 1f the more decisively it cleared them. Not a
+ *   probability, and not learned — see [ClapCandidateDetector].
+ * @param transientMillis the clap's duration: onset to the point the level returned
+ *   to background. In practice a measure of the room as much as the clap.
+ */
 data class ClapCandidate(
     /** Timeline position of the onset frame — not of the confirmation, which lags. */
     val onsetMillis: Long,
-    /** 0.5f at the detection thresholds, rising towards 1f for a decisive clap. */
     val confidence: Float,
     val peak: Float,
     val ambientRatio: Float,
-    /** Onset to the point the level returned to background. */
     val transientMillis: Long,
+    val crestFactor: Float = 0f,
+    val highFrequencyRatio: Float = 0f,
+    val attackRatio: Float = 0f,
 )
 
 /** Why a loud sound was not accepted. Surfaced in the test screen for tuning. */
@@ -33,6 +46,12 @@ enum class ClapRejection {
 
     /** Something else started before the transient had settled. */
     NO_QUIET_AFTER,
+
+    /**
+     * Too many separate onsets in a short window. Applause, hammering, cutlery in a
+     * drawer — bursts where some pair would otherwise land in clap timing by chance.
+     */
+    TOO_MANY_TRANSIENTS,
 }
 
 /** Outcome of feeding one frame to [ClapCandidateDetector]. */
@@ -65,6 +84,18 @@ sealed interface ClapDetection {
  * [ClapCandidate.onsetMillis] carries the onset time: all timing between claps is
  * measured onset to onset, unaffected by the confirmation lag.
  *
+ * Two reliability mechanisms sit on top of those phases:
+ *
+ *  - **An adaptive absolute gate.** The peak threshold is raised in step with the
+ *    tracked ambient peak, bounded by [ClapProfile.adaptiveRangeUp], so a room that
+ *    gets busier demands a louder clap instead of admitting the noise. See
+ *    [ClapProfile.adaptiveMinPeak].
+ *  - **Burst suppression.** More than [ClapProfile.maxTransientsPerWindow] separate
+ *    onsets inside [ClapProfile.transientWindowMillis] and onsets stop being trusted
+ *    until the room settles. Without it, any sufficiently dense burst — applause,
+ *    hammering, a dropped handful of cutlery — eventually contains two impulses in
+ *    clap timing purely by chance.
+ *
  * Pure Kotlin and fully deterministic — the same frames always give the same
  * answer, which is what makes the synthetic-audio tests meaningful. Stateful across
  * frames, so one instance belongs to one capture session.
@@ -88,12 +119,29 @@ class ClapCandidateDetector(
     private var phase: Phase = Phase.Idle
     private var quietBeforeMillis = 0L
 
+    /** Onset times inside the sliding window, oldest first. */
+    private val recentOnsets = ArrayDeque<Long>()
+    private var suppressedUntilMillis: Long? = null
+
     /** True while a sound is being measured. Shown in the test screen. */
     val transientInProgress: Boolean get() = phase is Phase.Transient
+
+    /** True while onsets are being ignored because the room is a mess of them. */
+    val suppressingBurst: Boolean get() = suppressedUntilMillis != null
+
+    /**
+     * The peak threshold currently in force, after ambient adaptation. Published in
+     * diagnostics so the test screen can show it moving with the room.
+     */
+    var effectiveMinPeak: Float = profile.minPeakAmplitude
+        private set
 
     fun reset() {
         phase = Phase.Idle
         quietBeforeMillis = 0L
+        recentOnsets.clear()
+        suppressedUntilMillis = null
+        effectiveMinPeak = profile.minPeakAmplitude
     }
 
     fun onFrame(features: AudioFrameFeatures): ClapDetection {
@@ -117,11 +165,15 @@ class ClapCandidateDetector(
         isQuiet: Boolean,
         frameMillis: Long,
     ): ClapDetection {
-        val loudEnough = features.peak >= profile.minPeakAmplitude &&
+        val now = features.timestampMillis
+        effectiveMinPeak = profile.adaptiveMinPeak(features.ambientPeak)
+
+        val loudEnough = features.peak >= effectiveMinPeak &&
             features.ambientRatio >= profile.minAmbientRatio
 
         if (!loudEnough) {
             quietBeforeMillis = if (isQuiet) quietBeforeMillis + frameMillis else 0L
+            releaseSuppressionIfSettled(now)
             return ClapDetection.None
         }
 
@@ -129,6 +181,20 @@ class ClapCandidateDetector(
         if (rejection != null) {
             quietBeforeMillis = 0L
             return ClapDetection.Rejected(rejection, features.timestampMillis)
+        }
+
+        // It looks like a clap. Is the room producing an implausible number of them?
+        // Only clap-shaped onsets are counted: speech and music are already rejected
+        // above, and letting them inflate this counter would make the reported reason
+        // less useful without changing the outcome.
+        pruneOnsets(now)
+        recentOnsets.addLast(now)
+        if (recentOnsets.size > profile.maxTransientsPerWindow) {
+            suppressedUntilMillis = now + profile.suppressionReleaseMillis
+        }
+        if (suppressedUntilMillis?.let { now < it } == true) {
+            quietBeforeMillis = 0L
+            return ClapDetection.Rejected(ClapRejection.TOO_MANY_TRANSIENTS, now)
         }
 
         phase = Phase.Transient(
@@ -161,6 +227,9 @@ class ClapCandidateDetector(
                         peak = current.peak,
                         ambientRatio = current.onset.ambientRatio,
                         transientMillis = decayedAt - current.onset.timestampMillis,
+                        crestFactor = current.onset.crestFactor,
+                        highFrequencyRatio = current.onset.highFrequencyRatio,
+                        attackRatio = current.onset.attackRatio,
                     ),
                 )
             }
@@ -190,6 +259,20 @@ class ClapCandidateDetector(
         return ClapDetection.None
     }
 
+    private fun pruneOnsets(now: Long) {
+        val cutoff = now - profile.transientWindowMillis
+        while (recentOnsets.isNotEmpty() && recentOnsets.first() < cutoff) {
+            recentOnsets.removeFirst()
+        }
+    }
+
+    /** Lifts suppression once the window has passed and the room has gone quiet. */
+    private fun releaseSuppressionIfSettled(now: Long) {
+        pruneOnsets(now)
+        val until = suppressedUntilMillis ?: return
+        if (now >= until) suppressedUntilMillis = null
+    }
+
     /** First character test the onset fails, or null if it passes all of them. */
     private fun rejectionFor(features: AudioFrameFeatures): ClapRejection? = when {
         quietBeforeMillis < profile.quietBeforeMillis -> ClapRejection.NO_QUIET_BEFORE
@@ -208,7 +291,7 @@ class ClapCandidateDetector(
      */
     private fun confidenceOf(onset: AudioFrameFeatures): Float {
         val margins = listOf(
-            margin(onset.peak, profile.minPeakAmplitude),
+            margin(onset.peak, effectiveMinPeak),
             margin(onset.ambientRatio, profile.minAmbientRatio),
             margin(onset.attackRatio, profile.minAttackRatio),
             margin(onset.crestFactor, profile.minCrestFactor),

@@ -4,6 +4,8 @@ import android.Manifest
 import com.shelfit.sentinel.core.MonotonicClock
 import com.shelfit.sentinel.core.audio.AudioInput
 import com.shelfit.sentinel.core.audio.AudioInputUnavailableException
+import com.shelfit.sentinel.core.diagnostics.DiagnosticEvent
+import com.shelfit.sentinel.core.diagnostics.EventLog
 import com.shelfit.sentinel.core.sensor.SensorAvailability
 import com.shelfit.sentinel.core.sensor.SensorKind
 import com.shelfit.sentinel.core.sensor.SensorStatusProvider
@@ -51,6 +53,7 @@ class DoubleClapDetector(
     private val audioInput: AudioInput,
     private val sensorStatus: SensorStatusProvider,
     private val clock: MonotonicClock,
+    private val eventLog: EventLog? = null,
 ) : TriggerDetector {
 
     override val trigger: Trigger = DoubleClapTrigger
@@ -80,10 +83,14 @@ class DoubleClapDetector(
 
             _diagnostics.value = ClapDiagnostics(listening = true)
             _state.value = TriggerState.Active
+            eventLog?.record(DiagnosticEvent.Kind.LISTENING_STARTED)
 
             audioInput.frames(config.audio).collect { frame ->
                 val features = extractor.extract(frame)
+
+                val phaseBefore = gesture.phase
                 gesture.advanceTo(features.timestampMillis)
+                logPhaseTransition(phaseBefore, gesture.phase)
 
                 var event: TriggerEvent? = null
                 var significant = false
@@ -94,6 +101,7 @@ class DoubleClapDetector(
                     is ClapDetection.Rejected -> {
                         session.lastRejection = detection.reason
                         significant = true
+                        logRejection(detection.reason, session)
                     }
 
                     is ClapDetection.Candidate -> {
@@ -101,13 +109,26 @@ class DoubleClapDetector(
                         session.lastCandidateAtMillis = detection.clap.onsetMillis
                         session.lastCandidateConfidence = detection.clap.confidence
                         session.lastRejection = null
+                        session.lastLoggedRejection = null
                         significant = true
+                        eventLog?.record(
+                            DiagnosticEvent.Kind.CLAP_CANDIDATE,
+                            formatConfidence(detection.clap.confidence),
+                        )
 
                         val outcome = gesture.onClapCandidate(detection.clap)
+                        if (outcome is DoubleClapOutcome.FirstClapAccepted) {
+                            eventLog?.record(DiagnosticEvent.Kind.AWAITING_SECOND_CLAP)
+                        }
                         if (outcome is DoubleClapOutcome.DoubleClapDetected) {
                             session.detectionCount++
                             session.lastGapMillis = outcome.gapMillis
                             session.lastDetectionConfidence = outcome.confidence
+                            eventLog?.record(
+                                DiagnosticEvent.Kind.DOUBLE_CLAP_DETECTED,
+                                "${outcome.gapMillis} ms apart, " +
+                                    formatConfidence(outcome.confidence),
+                            )
                             event = TriggerEvent(
                                 triggerId = trigger.id,
                                 elapsedRealtimeMillis = clock.elapsedMillis(),
@@ -118,16 +139,20 @@ class DoubleClapDetector(
                     }
                 }
 
-                publishDiagnostics(features, gesture.phase, session, significant)
+                publishDiagnostics(features, gesture.phase, candidates, session, significant)
 
                 event?.let { emit(it) }
             }
         }
             .catch { error ->
-                _state.value = TriggerState.Failed(describe(error))
+                val message = describe(error)
+                _state.value = TriggerState.Failed(message)
+                eventLog?.record(DiagnosticEvent.Kind.DETECTOR_FAILED, message)
             }
             .onCompletion {
+                val wasListening = _diagnostics.value.listening
                 _diagnostics.value = ClapDiagnostics()
+                if (wasListening) eventLog?.record(DiagnosticEvent.Kind.LISTENING_STOPPED)
                 // A failure is worth leaving on screen; anything else is just a stop.
                 if (_state.value !is TriggerState.Failed) {
                     _state.value = TriggerState.Idle
@@ -160,9 +185,47 @@ class DoubleClapDetector(
      * than the detection itself. Claps and rejections always publish — they are rare
      * and they are the point.
      */
+    /**
+     * Logs the transitions the state machine makes on its own, as timers expire.
+     * These have no triggering frame, so they would otherwise be invisible.
+     */
+    private fun logPhaseTransition(before: DoubleClapPhase, after: DoubleClapPhase) {
+        if (before === after) return
+        when {
+            before is DoubleClapPhase.AwaitingSecondClap && after is DoubleClapPhase.Idle ->
+                eventLog?.record(DiagnosticEvent.Kind.SECOND_CLAP_TIMED_OUT)
+
+            before is DoubleClapPhase.CoolingDown && after is DoubleClapPhase.Idle ->
+                eventLog?.record(DiagnosticEvent.Kind.COOLDOWN_ENDED)
+
+            else -> Unit
+        }
+    }
+
+    /**
+     * Logs a rejection, collapsing repeats.
+     *
+     * A burst of noise produces the same reason many times over; recording each one
+     * would push everything useful out of a bounded log.
+     */
+    private fun logRejection(reason: ClapRejection, session: SessionTotals) {
+        if (session.lastLoggedRejection == reason) return
+        session.lastLoggedRejection = reason
+        val kind = if (reason == ClapRejection.TOO_MANY_TRANSIENTS) {
+            DiagnosticEvent.Kind.TRANSIENTS_SUPPRESSED
+        } else {
+            DiagnosticEvent.Kind.CLAP_REJECTED
+        }
+        eventLog?.record(kind, reason.name)
+    }
+
+    private fun formatConfidence(confidence: Float): String =
+        "confidence ${(confidence * CONFIDENCE_PERCENT).toInt() / CONFIDENCE_PERCENT}"
+
     private fun publishDiagnostics(
         features: AudioFrameFeatures,
         phase: DoubleClapPhase,
+        candidates: ClapCandidateDetector,
         session: SessionTotals,
         significant: Boolean,
     ) {
@@ -175,11 +238,23 @@ class DoubleClapDetector(
 
         session.lastPublishMillis = features.timestampMillis
 
+        val gate = candidates.effectiveMinPeak
+        if (gate > session.lastReportedGate * GATE_CHANGE_FACTOR) {
+            eventLog?.record(
+                DiagnosticEvent.Kind.AMBIENT_THRESHOLD_RAISED,
+                "peak gate now ${"%.3f".format(gate)}",
+            )
+        }
+        session.lastReportedGate = gate
+
         _diagnostics.value = ClapDiagnostics(
             listening = true,
             level = features.rms,
             peak = features.peak,
             noiseFloor = features.noiseFloor,
+            ambientPeak = features.ambientPeak,
+            effectiveMinPeak = gate,
+            suppressingBurst = candidates.suppressingBurst,
             phase = phase,
             candidateCount = session.candidateCount,
             detectionCount = session.detectionCount,
@@ -207,10 +282,18 @@ class DoubleClapDetector(
         var lastGapMillis: Long? = null
         var lastDetectionConfidence: Float? = null
         var lastPublishMillis = Long.MIN_VALUE
+        var lastLoggedRejection: ClapRejection? = null
+
+        /** Last gate value logged, so only meaningful movement is recorded. */
+        var lastReportedGate = 0f
     }
 
     private companion object {
         const val LEVEL_PUBLISH_INTERVAL_MILLIS = 64L
         const val GAP_DETAIL_KEY = "gapMillis"
+        const val CONFIDENCE_PERCENT = 100f
+
+        /** Only log the adaptive gate when it moves by half as much again. */
+        const val GATE_CHANGE_FACTOR = 1.5f
     }
 }

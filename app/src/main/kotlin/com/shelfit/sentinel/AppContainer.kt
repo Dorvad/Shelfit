@@ -1,10 +1,13 @@
 package com.shelfit.sentinel
 
 import android.content.Context
+import com.shelfit.sentinel.core.WallClock
 import com.shelfit.sentinel.core.action.ActionDispatcher
+import com.shelfit.sentinel.core.diagnostics.EventLog
 import com.shelfit.sentinel.core.rule.AutomationCoordinator
 import com.shelfit.sentinel.core.sensor.SensorStatusProvider
 import com.shelfit.sentinel.core.trigger.TriggerEngine
+import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.core.trigger.TriggerRegistry
 import com.shelfit.sentinel.data.RuleRepository
 import com.shelfit.sentinel.data.SettingsRepository
@@ -12,8 +15,11 @@ import com.shelfit.sentinel.data.triggerConfigurations
 import com.shelfit.sentinel.platform.AndroidSensorStatusProvider
 import com.shelfit.sentinel.platform.LogActionExecutor
 import com.shelfit.sentinel.platform.SystemMonotonicClock
+import com.shelfit.sentinel.platform.SystemWallClock
 import com.shelfit.sentinel.platform.VibrationActionExecutor
 import com.shelfit.sentinel.platform.audio.AudioRecordInput
+import com.shelfit.sentinel.trigger.audio.ClapCalibrator
+import com.shelfit.sentinel.trigger.audio.DoubleClapConfiguration
 import com.shelfit.sentinel.trigger.audio.DoubleClapDetector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,14 +53,32 @@ class AppContainer(context: Context) {
     val ruleRepository = RuleRepository()
 
     /**
+     * Metadata-only history of detector decisions, kept in memory for the lifetime of
+     * the process. Never written to disk — see [EventLog].
+     */
+    val wallClock: WallClock = SystemWallClock
+
+    val eventLog = EventLog(wallClock)
+
+    private val audioInput = AudioRecordInput(context)
+
+    /**
+     * Measures the room and the user's claps. Shares [audioInput] with the detector,
+     * so callers must stop detection before calibrating — the microphone serves one
+     * client at a time.
+     */
+    val clapCalibrator = ClapCalibrator(audioInput)
+
+    /**
      * Exposed as its concrete type so the detector test screen can read
      * [DoubleClapDetector.diagnostics]. The engine still only sees a
      * `TriggerDetector`.
      */
     val doubleClapDetector = DoubleClapDetector(
-        audioInput = AudioRecordInput(context),
+        audioInput = audioInput,
         sensorStatus = sensorStatusProvider,
         clock = SystemMonotonicClock,
+        eventLog = eventLog,
     )
 
     val triggerRegistry = TriggerRegistry(
@@ -95,14 +119,24 @@ class AppContainer(context: Context) {
     }
 
     /**
-     * Starts detection with the user's current settings.
+     * Configuration to run instead of the saved settings, used while a calibration
+     * result is being tried out. Null means "use what is saved".
+     */
+    private var trialConfiguration: DoubleClapConfiguration? = null
+
+    /**
+     * Starts detection with the user's current settings, or with a trial
+     * configuration if one is in force.
      *
-     * Lives here rather than in a ViewModel because both the dashboard and the
-     * detector test screen start the same engine, and neither should own the
-     * settings-to-configuration mapping.
+     * Lives here rather than in a ViewModel because the dashboard, the detector test
+     * screen and calibration all start the same engine, and none of them should own
+     * the settings-to-configuration mapping.
      */
     suspend fun startDetection() {
-        triggerEngine.start(settingsRepository.settings.first().triggerConfigurations())
+        val configurations = trialConfiguration
+            ?.let { mapOf(TriggerId.DoubleClap to it) }
+            ?: settingsRepository.settings.first().triggerConfigurations()
+        triggerEngine.start(configurations)
     }
 
     fun stopDetection() {
@@ -121,5 +155,25 @@ class AppContainer(context: Context) {
         if (!triggerEngine.isRunning.value) return
         stopDetection()
         startDetection()
+    }
+
+    /**
+     * Runs the full pipeline against an unsaved configuration so the user can try a
+     * calibration result before committing to it.
+     *
+     * Deliberately goes through the engine rather than a private detector: the point
+     * of the trial is that everything downstream behaves exactly as it will after
+     * saving, vibration included.
+     */
+    suspend fun startTrial(configuration: DoubleClapConfiguration) {
+        trialConfiguration = configuration
+        stopDetection()
+        startDetection()
+    }
+
+    /** Ends a trial and stops detection. The saved settings are untouched. */
+    fun endTrial() {
+        trialConfiguration = null
+        stopDetection()
     }
 }

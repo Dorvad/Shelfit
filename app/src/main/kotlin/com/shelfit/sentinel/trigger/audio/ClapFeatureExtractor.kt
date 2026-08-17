@@ -18,6 +18,9 @@ import kotlin.math.sqrt
  *   0f..1f. Approximates `sin²(pi * f / sampleRate)` for a tone at `f`, so it
  *   separates broadband claps from low-frequency thuds cheaply.
  * @param noiseFloor tracked background RMS at this point in the stream.
+ * @param ambientPeak tracked background *peak* level, following the same slow-up,
+ *   fast-down rule as [noiseFloor]. Distinct from it because the absolute peak gate
+ *   has to be compared against how loud the room actually gets, not its average.
  * @param ambientRatio [rms] / [noiseFloor]. How far above the room this frame sits.
  * @param attackRatio [peak] divided by the previous frame's peak. The onset cue.
  * @param millisSinceStart position on the capture timeline, measured from the first
@@ -34,6 +37,7 @@ data class AudioFrameFeatures(
     val noiseFloor: Float,
     val ambientRatio: Float,
     val attackRatio: Float,
+    val ambientPeak: Float = 0f,
 )
 
 /**
@@ -53,6 +57,7 @@ class ClapFeatureExtractor(
 ) {
 
     private var noiseFloor = 0f
+    private var ambientPeak = 0f
     private var previousPeak = 0f
     private var previousSample = 0f
     private var firstTimestampMillis: Long? = null
@@ -67,6 +72,7 @@ class ClapFeatureExtractor(
 
     fun reset() {
         noiseFloor = 0f
+        ambientPeak = 0f
         previousPeak = 0f
         previousSample = 0f
         firstTimestampMillis = null
@@ -116,7 +122,8 @@ class ClapFeatureExtractor(
         val zeroCrossingRate = if (count > 1) zeroCrossings.toFloat() / (count - 1) else 0f
         val attackRatio = peak / maxOf(previousPeak, ATTACK_REFERENCE_FLOOR)
 
-        updateNoiseFloor(rms)
+        noiseFloor = followAmbient(noiseFloor, rms)
+        ambientPeak = followAmbient(ambientPeak, peak)
         val ambientRatio = rms / maxOf(noiseFloor, EPSILON)
 
         previousPeak = peak
@@ -132,25 +139,25 @@ class ClapFeatureExtractor(
             noiseFloor = noiseFloor,
             ambientRatio = ambientRatio,
             attackRatio = attackRatio,
+            ambientPeak = ambientPeak,
         )
     }
 
     /**
-     * Follows the background level: quickly downwards, slowly upwards.
+     * Follows a background level: quickly downwards, slowly upwards.
      *
      * The asymmetry is the whole trick. Rising slowly means a clap — loud but brief
-     * — leaves the floor essentially untouched, so it still stands out as a
-     * transient. Music or a running tap, loud for seconds, does pull the floor up,
-     * after which it correctly stops looking like a transient.
+     * — leaves the background essentially untouched, so it still stands out as a
+     * transient. Music or a running tap, loud for seconds, does pull it up, after
+     * which it correctly stops registering as a transient.
+     *
+     * Used for both the RMS floor and the peak envelope, so the two adapt at the same
+     * rate and a change in the room moves them together.
      */
-    private fun updateNoiseFloor(rms: Float) {
-        val floor = noiseFloor
-        if (floor <= 0f) {
-            noiseFloor = rms
-            return
-        }
-        val coefficient = if (rms < floor) fallCoefficient else riseCoefficient
-        noiseFloor = floor + (rms - floor) * coefficient
+    private fun followAmbient(current: Float, observed: Float): Float {
+        if (current <= 0f) return observed
+        val coefficient = if (observed < current) fallCoefficient else riseCoefficient
+        return current + (observed - current) * coefficient
     }
 
     private fun coefficientFor(timeConstantMillis: Long): Float {

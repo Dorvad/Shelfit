@@ -1,19 +1,14 @@
 package com.shelfit.sentinel.ui.claplab
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -25,20 +20,23 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -48,15 +46,26 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shelfit.sentinel.AppContainer
 import com.shelfit.sentinel.R
 import com.shelfit.sentinel.core.action.ActionResult
+import com.shelfit.sentinel.core.diagnostics.DiagnosticEvent
 import com.shelfit.sentinel.core.trigger.TriggerState
 import com.shelfit.sentinel.trigger.audio.ClapDiagnostics
+import com.shelfit.sentinel.trigger.audio.ClapProfile
 import com.shelfit.sentinel.trigger.audio.ClapRejection
 import com.shelfit.sentinel.trigger.audio.DoubleClapPhase
+import com.shelfit.sentinel.trigger.audio.SensitivityLevel
+import com.shelfit.sentinel.ui.components.LabelledRow
+import com.shelfit.sentinel.ui.components.LevelMeter
+import com.shelfit.sentinel.ui.components.SectionCard
+import com.shelfit.sentinel.ui.components.formatConfidence
+import com.shelfit.sentinel.ui.components.formatDecibels
+import com.shelfit.sentinel.ui.components.formatMultiple
 import com.shelfit.sentinel.ui.permission.MicrophonePermissionState
 import com.shelfit.sentinel.ui.permission.rememberMicrophonePermissionState
 import com.shelfit.sentinel.ui.theme.SentinelTheme
 import kotlinx.coroutines.delay
-import kotlin.math.log10
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun ClapLabRoute(
@@ -71,8 +80,9 @@ fun ClapLabRoute(
         uiState = uiState,
         permission = permission,
         onToggleListening = viewModel::toggleListening,
-        onSensitivityCommitted = viewModel::commitSensitivity,
+        onSensitivityChange = viewModel::setSensitivity,
         onHapticFeedbackChange = viewModel::setHapticFeedbackEnabled,
+        onClearLog = viewModel::clearLog,
         onNavigateBack = onNavigateBack,
     )
 }
@@ -83,8 +93,9 @@ fun ClapLabScreen(
     uiState: ClapLabUiState,
     permission: MicrophonePermissionState,
     onToggleListening: () -> Unit,
-    onSensitivityCommitted: (Float) -> Unit,
+    onSensitivityChange: (SensitivityLevel) -> Unit,
     onHapticFeedbackChange: (Boolean) -> Unit,
+    onClearLog: () -> Unit,
     onNavigateBack: () -> Unit,
 ) {
     Scaffold(
@@ -122,9 +133,13 @@ fun ClapLabScreen(
             TuningCard(
                 sensitivity = uiState.sensitivity,
                 hapticFeedbackEnabled = uiState.hapticFeedbackEnabled,
-                onSensitivityCommitted = onSensitivityCommitted,
+                onSensitivityChange = onSensitivityChange,
                 onHapticFeedbackChange = onHapticFeedbackChange,
             )
+
+            ThresholdCard(uiState.profile, uiState.calibrated)
+
+            EventLogCard(uiState.log, onClearLog)
 
             if (uiState.listening) {
                 OutlinedButton(
@@ -141,7 +156,7 @@ fun ClapLabScreen(
 
             Text(
                 text = "Audio is analysed in memory and discarded. Nothing is " +
-                    "recorded or sent anywhere.",
+                    "recorded or sent anywhere, and the log holds numbers only.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -169,11 +184,6 @@ private fun PermissionCard(permission: MicrophonePermissionState) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             if (permission.deniedAfterRequest) {
-                Text(
-                    text = "Access was declined. Grant it from the app's settings page.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
                 Button(onClick = permission.openAppSettings) { Text("Open app settings") }
             } else {
                 Button(onClick = permission.request) { Text("Grant microphone access") }
@@ -182,10 +192,6 @@ private fun PermissionCard(permission: MicrophonePermissionState) {
     }
 }
 
-/**
- * The unmissable part: fills with colour for a moment on every confirmed gesture and
- * shows how far apart the two claps were.
- */
 @Composable
 private fun DetectionBanner(diagnostics: ClapDiagnostics) {
     var flashing by remember { mutableStateOf(false) }
@@ -201,7 +207,7 @@ private fun DetectionBanner(diagnostics: ClapDiagnostics) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(120.dp),
+            .height(BANNER_HEIGHT),
         colors = CardDefaults.cardColors(
             containerColor = if (flashing) {
                 MaterialTheme.colorScheme.primary
@@ -223,8 +229,7 @@ private fun DetectionBanner(diagnostics: ClapDiagnostics) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-                val gap = diagnostics.lastGapMillis
-                if (gap != null) {
+                diagnostics.lastGapMillis?.let { gap ->
                     Text(
                         text = "Gap between claps: $gap ms",
                         style = MaterialTheme.typography.bodyMedium,
@@ -245,11 +250,20 @@ private fun LevelCard(diagnostics: ClapDiagnostics, listening: Boolean) {
     SectionCard("Microphone level") {
         LevelMeter(
             level = diagnostics.level,
-            noiseFloor = diagnostics.noiseFloor,
+            background = diagnostics.noiseFloor,
+            threshold = diagnostics.effectiveMinPeak,
         )
         LabelledRow("Level", formatDecibels(diagnostics.level))
-        LabelledRow("Background", formatDecibels(diagnostics.noiseFloor))
-        LabelledRow("Frame peak", formatDecibels(diagnostics.peak))
+        LabelledRow("Background (red)", formatDecibels(diagnostics.noiseFloor))
+        LabelledRow("Clap gate (purple)", formatDecibels(diagnostics.effectiveMinPeak))
+        LabelledRow("Background peak", formatDecibels(diagnostics.ambientPeak))
+        if (diagnostics.suppressingBurst) {
+            LabelledRow(
+                label = "Burst suppression",
+                value = "active — too many transients",
+                emphasise = true,
+            )
+        }
         if (!listening) {
             Text(
                 text = "Not listening.",
@@ -257,43 +271,6 @@ private fun LevelCard(diagnostics: ClapDiagnostics, listening: Boolean) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/**
- * Level on a decibel scale, with a tick showing where the tracked background sits.
- * A clap should read as a wide gap between the two.
- */
-@Composable
-private fun LevelMeter(level: Float, noiseFloor: Float) {
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(20.dp)
-            .background(
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = RoundedCornerShape(4.dp),
-            ),
-    ) {
-        val trackWidth = maxWidth
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(meterFraction(level))
-                .height(20.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(4.dp),
-                ),
-        )
-
-        Box(
-            modifier = Modifier
-                .offset(x = trackWidth * meterFraction(noiseFloor))
-                .width(2.dp)
-                .height(20.dp)
-                .background(MaterialTheme.colorScheme.error),
-        )
     }
 }
 
@@ -323,29 +300,30 @@ private fun StateCard(uiState: ClapLabUiState) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TuningCard(
-    sensitivity: Float,
+    sensitivity: SensitivityLevel,
     hapticFeedbackEnabled: Boolean,
-    onSensitivityCommitted: (Float) -> Unit,
+    onSensitivityChange: (SensitivityLevel) -> Unit,
     onHapticFeedbackChange: (Boolean) -> Unit,
 ) {
-    // Held locally while dragging: applying a value restarts capture, so it is only
-    // committed when the finger lifts.
-    var pending by remember(sensitivity) { mutableFloatStateOf(sensitivity) }
-
     SectionCard("Tuning") {
-        LabelledRow("Sensitivity", "%.2f".format(pending))
-        Slider(
-            value = pending,
-            onValueChange = { pending = it },
-            onValueChangeFinished = { onSensitivityCommitted(pending) },
-            valueRange = 0f..1f,
-        )
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SensitivityLevel.entries.forEachIndexed { index, level ->
+                SegmentedButton(
+                    selected = level == sensitivity,
+                    onClick = { onSensitivityChange(level) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = SensitivityLevel.entries.size,
+                    ),
+                    label = { Text(level.name.lowercase().replaceFirstChar(Char::titlecase)) },
+                )
+            }
+        }
         Text(
-            text = "Higher reacts to quieter and more distant claps, and lets more " +
-                "false triggers through. Applied when you release the slider, which " +
-                "restarts capture.",
+            text = "Applied immediately, which restarts capture.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -365,61 +343,97 @@ private fun TuningCard(
     }
 }
 
+/**
+ * The numeric thresholds actually in force, after calibration and sensitivity have
+ * both been applied. Read-only: these are derived values, and the way to change them
+ * is to recalibrate or move the sensitivity, not to edit them behind the model's back.
+ */
 @Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = title.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            content()
-        }
-    }
-}
-
-@Composable
-private fun LabelledRow(label: String, value: String, emphasise: Boolean = false) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+private fun ThresholdCard(profile: ClapProfile, calibrated: Boolean) {
+    SectionCard("Thresholds in force") {
         Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (emphasise) {
-                MaterialTheme.colorScheme.error
+            text = if (calibrated) {
+                "Derived from your calibration, then scaled by sensitivity."
             } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
+                "Generic defaults, scaled by sensitivity. Calibrate for better numbers."
             },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        LabelledRow("Min clap level", formatDecibels(profile.minPeakAmplitude))
+        LabelledRow("Min above background", formatMultiple(profile.minAmbientRatio))
+        LabelledRow("Min attack", formatMultiple(profile.minAttackRatio))
+        LabelledRow("Min crest factor", formatMultiple(profile.minCrestFactor))
+        LabelledRow("Min brightness", "%.3f".format(profile.minHighFrequencyRatio))
+        LabelledRow("Max clap duration", "${profile.maxTransientMillis} ms")
+        LabelledRow("Quiet needed before", "${profile.quietBeforeMillis} ms")
+        LabelledRow("Quiet needed after", "${profile.quietAfterMillis} ms")
+        LabelledRow(
+            "Burst allowance",
+            "${profile.maxTransientsPerWindow} per ${profile.transientWindowMillis} ms",
+        )
+        LabelledRow("Adaptive gate ceiling", formatMultiple(profile.adaptiveRangeUp))
     }
 }
 
-/** Maps a 0f..1f amplitude onto the meter via decibels, which matches how loudness reads. */
-private fun meterFraction(amplitude: Float): Float {
-    if (amplitude <= 0f) return 0f
-    val decibels = 20f * log10(amplitude)
-    return ((decibels - METER_FLOOR_DB) / -METER_FLOOR_DB).coerceIn(0f, 1f)
+@Composable
+private fun EventLogCard(log: List<DiagnosticEvent>, onClear: () -> Unit) {
+    SectionCard("Event log") {
+        if (log.isEmpty()) {
+            Text(
+                text = "Nothing yet. Start detection and clap.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@SectionCard
+        }
+
+        log.take(LOG_LINES).forEach { event ->
+            Text(
+                text = buildString {
+                    append(event.atEpochMillis.asClockTime())
+                    append("  ")
+                    append(event.kind.label())
+                    event.detail?.let {
+                        append("  ")
+                        append(it)
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = if (event.kind == DiagnosticEvent.Kind.DOUBLE_CLAP_DETECTED) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+
+        TextButton(onClick = onClear) { Text("Clear log") }
+    }
 }
 
-private fun formatDecibels(amplitude: Float): String {
-    if (amplitude <= 0f) return "—"
-    return "%.0f dB".format(20f * log10(amplitude))
-}
+private fun Long.asClockTime(): String =
+    CLOCK_FORMAT.format(Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault()))
 
-private fun formatConfidence(confidence: Float): String = "%.2f".format(confidence)
+private val CLOCK_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+
+private fun DiagnosticEvent.Kind.label(): String = when (this) {
+    DiagnosticEvent.Kind.LISTENING_STARTED -> "Listening started"
+    DiagnosticEvent.Kind.LISTENING_STOPPED -> "Listening stopped"
+    DiagnosticEvent.Kind.DETECTOR_FAILED -> "Detector failed"
+    DiagnosticEvent.Kind.CLAP_CANDIDATE -> "Clap candidate"
+    DiagnosticEvent.Kind.CLAP_REJECTED -> "Sound rejected"
+    DiagnosticEvent.Kind.AWAITING_SECOND_CLAP -> "Waiting for second clap"
+    DiagnosticEvent.Kind.DOUBLE_CLAP_DETECTED -> "DOUBLE CLAP DETECTED"
+    DiagnosticEvent.Kind.SECOND_CLAP_TIMED_OUT -> "Second clap timed out"
+    DiagnosticEvent.Kind.COOLDOWN_ENDED -> "Cooldown ended"
+    DiagnosticEvent.Kind.TRANSIENTS_SUPPRESSED -> "Burst suppressed"
+    DiagnosticEvent.Kind.AMBIENT_THRESHOLD_RAISED -> "Threshold raised"
+    DiagnosticEvent.Kind.CALIBRATION_SAVED -> "Calibration saved"
+    DiagnosticEvent.Kind.CALIBRATION_CLEARED -> "Calibration cleared"
+}
 
 private fun DoubleClapPhase.label(): String = when (this) {
     DoubleClapPhase.Idle -> "Idle"
@@ -434,6 +448,7 @@ private fun ClapRejection.label(): String = when (this) {
     ClapRejection.LOW_FREQUENCY_RUMBLE -> "Too low-pitched (thud)"
     ClapRejection.TRANSIENT_TOO_LONG -> "Lasted too long"
     ClapRejection.NO_QUIET_AFTER -> "No quiet afterwards"
+    ClapRejection.TOO_MANY_TRANSIENTS -> "Too many transients (burst)"
 }
 
 private fun TriggerState.label(): String = when (this) {
@@ -456,7 +471,8 @@ private fun ActionResult.label(): String = when (this) {
 }
 
 private const val FLASH_MILLIS = 1_600L
-private const val METER_FLOOR_DB = -70f
+private const val LOG_LINES = 20
+private val BANNER_HEIGHT = 120.dp
 
 @Preview(showBackground = true)
 @Composable
@@ -471,21 +487,23 @@ private fun ClapLabScreenPreview() {
                     level = 0.02f,
                     peak = 0.05f,
                     noiseFloor = 0.01f,
+                    effectiveMinPeak = 0.08f,
                     phase = DoubleClapPhase.AwaitingSecondClap(1_000L, 1_900L),
                     candidateCount = 3,
                     detectionCount = 1,
                     lastGapMillis = 240L,
                 ),
+                log = listOf(
+                    DiagnosticEvent(0L, DiagnosticEvent.Kind.DOUBLE_CLAP_DETECTED, "240 ms apart"),
+                    DiagnosticEvent(0L, DiagnosticEvent.Kind.AWAITING_SECOND_CLAP),
+                    DiagnosticEvent(0L, DiagnosticEvent.Kind.CLAP_CANDIDATE, "confidence 0.91"),
+                ),
             ),
-            permission = MicrophonePermissionState(
-                granted = true,
-                deniedAfterRequest = false,
-                request = {},
-                openAppSettings = {},
-            ),
+            permission = MicrophonePermissionState(true, false, {}, {}),
             onToggleListening = {},
-            onSensitivityCommitted = {},
+            onSensitivityChange = {},
             onHapticFeedbackChange = {},
+            onClearLog = {},
             onNavigateBack = {},
         )
     }

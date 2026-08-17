@@ -6,9 +6,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.shelfit.sentinel.AppContainer
+import com.shelfit.sentinel.core.diagnostics.DiagnosticEvent
 import com.shelfit.sentinel.core.rule.AutomationOutcome
 import com.shelfit.sentinel.core.trigger.TriggerState
+import com.shelfit.sentinel.data.SentinelSettings
 import com.shelfit.sentinel.trigger.audio.ClapDiagnostics
+import com.shelfit.sentinel.trigger.audio.ClapProfile
+import com.shelfit.sentinel.trigger.audio.SensitivityLevel
+import com.shelfit.sentinel.trigger.audio.scaledBy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -20,10 +25,15 @@ data class ClapLabUiState(
     val listening: Boolean = false,
     val detectorState: TriggerState = TriggerState.Idle,
     val diagnostics: ClapDiagnostics = ClapDiagnostics(),
-    val sensitivity: Float = 0.5f,
+    val sensitivity: SensitivityLevel = SensitivityLevel.Default,
     val hapticFeedbackEnabled: Boolean = true,
+    /** True when a saved calibration is providing the baseline thresholds. */
+    val calibrated: Boolean = false,
+    /** The thresholds actually in force, for the advanced readout. */
+    val profile: ClapProfile = ClapProfile(),
     /** Last rule outcome, evidence that a detection reached the action layer. */
     val lastOutcome: AutomationOutcome? = null,
+    val log: List<DiagnosticEvent> = emptyList(),
 )
 
 /**
@@ -31,8 +41,8 @@ data class ClapLabUiState(
  *
  * Takes the whole [AppContainer] rather than a list of collaborators: this screen
  * deliberately observes across the entire pipeline — detector diagnostics, engine
- * state, settings, and the rule layer's outcomes — and enumerating those as
- * constructor parameters would just restate the container.
+ * state, settings, the event log, and the rule layer's outcomes — and enumerating
+ * those as constructor parameters would just restate the container.
  */
 class ClapLabViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -50,15 +60,18 @@ class ClapLabViewModel(private val container: AppContainer) : ViewModel() {
         detector.state,
         detector.diagnostics,
         container.settingsRepository.settings,
-        lastOutcome,
-    ) { listening, detectorState, diagnostics, settings, outcome ->
+        combine(lastOutcome, container.eventLog.events) { outcome, log -> outcome to log },
+    ) { listening, detectorState, diagnostics, settings, outcomeAndLog ->
         ClapLabUiState(
             listening = listening,
             detectorState = detectorState,
             diagnostics = diagnostics,
-            sensitivity = settings.doubleClapSensitivity,
+            sensitivity = settings.sensitivity,
             hapticFeedbackEnabled = settings.hapticFeedbackEnabled,
-            lastOutcome = outcome,
+            calibrated = settings.calibration != null,
+            profile = settings.profileInForce(),
+            lastOutcome = outcomeAndLog.first,
+            log = outcomeAndLog.second,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -77,13 +90,15 @@ class ClapLabViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /**
-     * Persists the sensitivity and reloads it into a running detector.
+     * Applies a sensitivity level and reloads it into a running detector.
      *
-     * Call on slider release, not on every drag: applying it restarts capture.
+     * Detectors read their configuration once, when collection starts, so this
+     * restarts capture. Three discrete steps rather than a slider means that happens
+     * at most once per tap.
      */
-    fun commitSensitivity(sensitivity: Float) {
+    fun setSensitivity(level: SensitivityLevel) {
         viewModelScope.launch {
-            container.settingsRepository.setDoubleClapSensitivity(sensitivity)
+            container.settingsRepository.setSensitivity(level)
             container.restartDetection()
         }
     }
@@ -93,6 +108,12 @@ class ClapLabViewModel(private val container: AppContainer) : ViewModel() {
             container.settingsRepository.setHapticFeedbackEnabled(enabled)
         }
     }
+
+    fun clearLog() = container.eventLog.clear()
+
+    /** Mirrors what `triggerConfigurations()` builds, for display. */
+    private fun SentinelSettings.profileInForce(): ClapProfile =
+        (calibration?.toProfile() ?: ClapProfile()).scaledBy(sensitivity.scalar)
 
     companion object {
         private const val STOP_TIMEOUT_MILLIS = 5_000L

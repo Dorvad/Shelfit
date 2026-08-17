@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.shelfit.sentinel.AppContainer
+import com.shelfit.sentinel.ui.calibration.CalibrationRoute
 import com.shelfit.sentinel.ui.claplab.ClapLabRoute
 import com.shelfit.sentinel.ui.dashboard.DashboardRoute
 import com.shelfit.sentinel.ui.settings.SettingsRoute
@@ -20,6 +21,9 @@ object Destination {
 
     /** Developer screen for tuning and verifying clap detection. */
     const val CLAP_LAB = "clap-lab"
+
+    /** Guided calibration. */
+    const val CALIBRATION = "calibration"
 }
 
 @Composable
@@ -39,6 +43,14 @@ fun SentinelNavHost(
             SettingsRoute(
                 container = container,
                 onNavigateBack = { navController.popBackStack() },
+                onOpenCalibration = { navController.navigate(Destination.CALIBRATION) },
+                onOpenClapLab = { navController.navigate(Destination.CLAP_LAB) },
+            )
+        }
+        composable(Destination.CALIBRATION) {
+            CalibrationRoute(
+                container = container,
+                onFinished = { navController.popBackStack() },
             )
         }
         composable(Destination.CLAP_LAB) {

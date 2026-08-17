@@ -15,12 +15,20 @@ package com.shelfit.sentinel.trigger.audio
  * @param noiseFloor tracked background level, same scale.
  * @param lastRejection why the most recent loud sound was not a clap — the field
  *   that makes tuning possible without a debugger attached.
+ * @param effectiveMinPeak the adaptive absolute gate. Watching this move with the
+ *   room is the clearest way to see the adaptive floor working.
  */
 data class ClapDiagnostics(
     val listening: Boolean = false,
     val level: Float = 0f,
     val peak: Float = 0f,
     val noiseFloor: Float = 0f,
+    /** Tracked background peak, which the adaptive gate follows. */
+    val ambientPeak: Float = 0f,
+    /** The absolute peak gate currently in force, after ambient adaptation. */
+    val effectiveMinPeak: Float = 0f,
+    /** True while onsets are being ignored because the room is producing too many. */
+    val suppressingBurst: Boolean = false,
     val phase: DoubleClapPhase = DoubleClapPhase.Idle,
     val candidateCount: Int = 0,
     val detectionCount: Int = 0,

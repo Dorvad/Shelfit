@@ -6,11 +6,16 @@ A spare handset is left plugged in somewhere useful. It watches or listens for a
 physical cue — the first one being a **double clap** — and runs a configured
 action. All sensor interpretation happens on the device.
 
-## Status: stage 2 of 6 — double clap detection
+## Status: stage 2 of 6 — double clap detection, calibrated per device
 
-Clapping twice now works end to end on a real device: the microphone hears it, the
+Clapping twice works end to end on a real device: the microphone hears it, the
 detector confirms it, a rule matches it, and the phone buzzes. Nothing leaves the
 device and no audio is ever stored.
+
+Microphones, room acoustics and noise floors differ enough that one fixed threshold
+cannot serve every phone, so detection is **calibrated**: a guided flow measures the
+room and a handful of the user's own claps, derives thresholds from them, and lets the
+user try the result before saving it.
 
 What exists:
 
@@ -18,12 +23,16 @@ What exists:
 - Real microphone capture via `AudioRecord`, and a deterministic clap detector built
   from peak, background level, attack, crest factor, spectral tilt, transient
   duration and the quiet either side of the sound
-- A dashboard with microphone permission handling and a start/stop control
-- A developer screen for tuning: live level, tracked background, accepted claps,
-  why a loud sound was rejected, and the gap between the two claps
-- A settings screen backed by DataStore
-- 83 unit tests, including synthetic speech, music, doors and table knocks
-- A release build that passes R8 minification (~2 MB APK)
+- Guided calibration, with a quality verdict when the room and the claps are too
+  close together to separate
+- An adaptive peak threshold that tightens as a room gets busier, bounded so it never
+  drifts into deafness, plus burst suppression for hammering and rattles
+- Sensitivity as **Low / Normal / High**, with numeric thresholds shown read-only on
+  a developer screen
+- A metadata-only event log — `18:43:12  Clap candidate  confidence 0.91`
+- 134 unit tests, including synthetic speech, music, doors, table knocks, changing
+  room noise and rapid transient bursts
+- A release build that passes R8 minification (~2.3 MB APK)
 
 **Detection runs only while the app is in the foreground.** Android suspends
 microphone access for backgrounded apps, so unattended operation needs the
@@ -95,8 +104,48 @@ later becomes the first clap of a new pair. A detection is followed by a cooldow
 a burst of clapping produces one event rather than a stream.
 
 Everything above is tunable from `DoubleClapConfiguration`; the **Clap detector test**
-screen shows the live level, the tracked background, and which test rejected the last
-loud sound.
+screen shows the live level, the tracked background, the adaptive gate, the thresholds
+in force, and which test rejected the last loud sound.
+
+## Calibration
+
+Generic thresholds are a compromise nobody fits. Calibration replaces them with
+measurements:
+
+1. **Measure the room** for four seconds with nobody clapping. Produces a mean level
+   and a high percentile of frame peaks — the level the room actually *reaches*,
+   rather than its average, because one cough must not define a room.
+2. **Collect five claps** from where the system will really be used. Collection runs
+   with deliberately loose gates anchored to the ambient level just measured, since
+   the thresholds being established cannot also be the thresholds used to observe.
+3. **Derive thresholds.** The peak gate is placed at the geometric midpoint of the gap
+   between the room's peaks and the softest clap — the middle of the gap in decibels,
+   which is how loudness behaves. The decay window comes from the longest observed
+   clap, which is really a measurement of the room's reverberation. The brightness
+   floor tracks the microphone's high-frequency response, so a bright microphone ends
+   up *stricter* than the default and rejects more thuds.
+4. **Report quality.** If the room is nearly as loud as the claps, no threshold works;
+   the flow says so rather than shipping numbers that cannot succeed.
+5. **Try it before saving.** The new profile runs through the real pipeline, vibration
+   included, while still unsaved.
+
+Only derived numbers are stored — ambient level, clap peak levels, transient
+durations. Measurements are persisted rather than the thresholds computed from them,
+so improving the derivation later benefits anyone who has already calibrated.
+
+## Adapting to a changing room
+
+Calibration fixes a baseline; two mechanisms handle drift from it.
+
+The **absolute peak gate** rises with the tracked ambient peak, bounded to four times
+the calibrated value. It only ever rises — a quieter room is already handled by the
+ratio gate, which becomes easier to satisfy as the noise floor drops, so lowering the
+absolute gate too would buy sensitivity nobody asked for and pay for it in false
+triggers overnight.
+
+**Burst suppression** stops trusting onsets when more than four clap-shaped impulses
+arrive within two seconds. A double clap is two and a triple is three, so it engages
+only on genuine bursts: applause, hammering, cutlery in a drawer.
 
 ## Development stages
 
@@ -125,7 +174,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 83 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 134 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```
