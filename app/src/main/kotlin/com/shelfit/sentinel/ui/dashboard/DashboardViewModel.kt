@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.shelfit.sentinel.AppContainer
 import com.shelfit.sentinel.core.sensor.SensorStatus
+import com.shelfit.sentinel.core.sensormode.SensorHealth
 import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.core.trigger.TriggerState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +31,10 @@ data class DashboardUiState(
     val isRunning: Boolean = false,
     val sensors: List<SensorStatus> = emptyList(),
     val triggers: List<TriggerRowUi> = emptyList(),
-)
+    val health: SensorHealth = SensorHealth(),
+) {
+    val sensorModeEnabled: Boolean get() = health.desiredMode.isEnabled
+}
 
 /**
  * Presentation state for the dashboard.
@@ -53,10 +57,12 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
         container.triggerEngine.states,
         container.ruleRepository.rules,
         sensorSnapshot,
-    ) { isRunning, triggerStates, rules, sensors ->
+        container.sensorHealthRepository.health,
+    ) { isRunning, triggerStates, rules, sensors, health ->
         DashboardUiState(
             isRunning = isRunning,
             sensors = sensors,
+            health = health,
             triggers = registry.triggers.map { trigger ->
                 val rule = rules.firstOrNull { it.triggerId == trigger.id }
                 TriggerRowUi(
@@ -80,15 +86,30 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun refreshSensorStatus() {
         sensorSnapshot.value = readSensorStatus()
+        container.sensorHealthRepository.refresh()
     }
 
-    fun toggleListening() {
+    /**
+     * Turns Sensor Mode on or off.
+     *
+     * Goes through the foreground service rather than starting the engine directly:
+     * that is what lets listening continue with the screen off, and it is the only
+     * path that persists the user's intent.
+     */
+    fun toggleSensorMode() {
         viewModelScope.launch {
-            if (container.triggerEngine.isRunning.value) {
-                container.stopDetection()
+            if (uiState.value.sensorModeEnabled) {
+                container.sensorModeController.disable()
             } else {
-                container.startDetection()
+                container.sensorModeController.enable()
             }
+            refreshSensorStatus()
+        }
+    }
+
+    fun resumeListening() {
+        viewModelScope.launch {
+            container.sensorModeController.resume()
             refreshSensorStatus()
         }
     }

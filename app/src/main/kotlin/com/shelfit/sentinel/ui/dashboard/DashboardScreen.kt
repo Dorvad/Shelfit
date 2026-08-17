@@ -47,6 +47,7 @@ fun DashboardRoute(
     container: AppContainer,
     onOpenSettings: () -> Unit,
     onOpenClapLab: () -> Unit,
+    onOpenHealth: () -> Unit,
     viewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.factory(container)),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -61,9 +62,11 @@ fun DashboardRoute(
     DashboardScreen(
         uiState = uiState,
         permission = permission,
-        onToggleListening = viewModel::toggleListening,
+        onToggleSensorMode = viewModel::toggleSensorMode,
+        onResume = viewModel::resumeListening,
         onOpenSettings = onOpenSettings,
         onOpenClapLab = onOpenClapLab,
+        onOpenHealth = onOpenHealth,
     )
 }
 
@@ -72,9 +75,11 @@ fun DashboardRoute(
 fun DashboardScreen(
     uiState: DashboardUiState,
     permission: MicrophonePermissionState,
-    onToggleListening: () -> Unit,
+    onToggleSensorMode: () -> Unit,
+    onResume: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenClapLab: () -> Unit,
+    onOpenHealth: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -108,11 +113,17 @@ fun DashboardScreen(
                 TriggerCard(trigger)
             }
 
-            ListeningControl(
-                isRunning = uiState.isRunning,
+            SensorModeControl(
+                uiState = uiState,
                 enabled = permission.granted,
-                onToggleListening = onToggleListening,
+                onToggleSensorMode = onToggleSensorMode,
+                onResume = onResume,
             )
+
+            TextButton(
+                onClick = onOpenHealth,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Sensor health and setup") }
 
             TextButton(
                 onClick = onOpenClapLab,
@@ -199,33 +210,41 @@ private fun TriggerCard(trigger: TriggerRowUi) {
 }
 
 @Composable
-private fun ListeningControl(
-    isRunning: Boolean,
+private fun SensorModeControl(
+    uiState: DashboardUiState,
     enabled: Boolean,
-    onToggleListening: () -> Unit,
+    onToggleSensorMode: () -> Unit,
+    onResume: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (isRunning) {
-            OutlinedButton(onClick = onToggleListening, modifier = Modifier.fillMaxWidth()) {
-                Text("Stop listening")
+        if (uiState.health.resumeRequired) {
+            Button(
+                onClick = onResume,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Resume listening") }
+        } else if (uiState.sensorModeEnabled) {
+            OutlinedButton(onClick = onToggleSensorMode, modifier = Modifier.fillMaxWidth()) {
+                Text("Turn off Sensor Mode")
             }
         } else {
             Button(
-                onClick = onToggleListening,
+                onClick = onToggleSensorMode,
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Start listening")
-            }
+            ) { Text("Turn on Sensor Mode") }
         }
         Text(
-            text = "Detection runs while the app is open. Android suspends microphone " +
-                "access for backgrounded apps, so always-on operation needs the " +
-                "foreground service planned for the next stage.",
+            text = if (uiState.isRunning) {
+                "Listening with the screen off. Keep the phone plugged in."
+            } else {
+                "Sensor Mode runs a foreground service so listening continues with the " +
+                    "screen off."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -328,9 +347,11 @@ private fun DashboardScreenPreview() {
                 request = {},
                 openAppSettings = {},
             ),
-            onToggleListening = {},
+            onToggleSensorMode = {},
+            onResume = {},
             onOpenSettings = {},
             onOpenClapLab = {},
+            onOpenHealth = {},
         )
     }
 }

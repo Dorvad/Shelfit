@@ -79,7 +79,7 @@ class ClapFeatureExtractor(
     }
 
     fun extract(frame: AudioFrame): AudioFrameFeatures {
-        val count = frame.sampleCount.coerceAtMost(frame.samples.size)
+        val count = frame.sampleCount.coerceAtMost(frame.samples.size - frame.offset)
         val start = firstTimestampMillis ?: frame.startTimestampMillis.also {
             firstTimestampMillis = it
         }
@@ -91,7 +91,7 @@ class ClapFeatureExtractor(
         var previous = previousSample
 
         for (index in 0 until count) {
-            val sample = frame.samples[index] / FULL_SCALE
+            val sample = frame.samples[frame.offset + index] / FULL_SCALE
 
             val magnitude = abs(sample)
             if (magnitude > peak) peak = magnitude

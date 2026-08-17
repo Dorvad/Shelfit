@@ -180,8 +180,13 @@ class SyntheticSignal(
 }
 
 /**
- * Replays a fixed buffer through the [AudioInput] contract, timestamping frames from
- * the sample position exactly as the `AudioRecord` implementation does.
+ * Replays a fixed buffer through the [AudioInput] contract.
+ *
+ * Deliberately mirrors the `AudioRecord` implementation rather than simplifying it:
+ * frames are timestamped from the sample position, and a batch buffer is sliced into
+ * several frames sharing it at different offsets. Because every audio test runs through
+ * here, the offset plumbing that batching depends on is exercised by all of them rather
+ * than by one dedicated case.
  *
  * @param holdOpenAtEnd when true the flow suspends instead of completing, mimicking a
  *   microphone that keeps delivering. Use it to exercise cancellation; leave it false
@@ -195,14 +200,23 @@ private class SyntheticAudioInput(
     override fun frames(config: AudioCaptureConfig): Flow<AudioFrame> = flow {
         var position = 0
         while (position + config.frameSamples <= samples.size) {
-            emit(
-                AudioFrame(
-                    samples = samples.copyOfRange(position, position + config.frameSamples),
-                    sampleCount = config.frameSamples,
-                    startTimestampMillis = position * 1_000L / config.sampleRateHz,
-                ),
-            )
-            position += config.frameSamples
+            val batchEnd = (position + config.readSamples).coerceAtMost(samples.size)
+            val batch = samples.copyOfRange(position, batchEnd)
+
+            var offset = 0
+            while (offset + config.frameSamples <= batch.size) {
+                emit(
+                    AudioFrame(
+                        samples = batch,
+                        sampleCount = config.frameSamples,
+                        startTimestampMillis =
+                            (position + offset) * 1_000L / config.sampleRateHz,
+                        offset = offset,
+                    ),
+                )
+                offset += config.frameSamples
+            }
+            position += offset
         }
         if (holdOpenAtEnd) awaitCancellation()
     }

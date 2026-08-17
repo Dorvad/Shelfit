@@ -59,6 +59,40 @@ AudioInput -> ClapFeatureExtractor -> ClapCandidateDetector -> DoubleClapStateMa
 | `ClapCalibrator` | `trigger/audio/` | Runs the guided measurement over `AudioInput`. Cold flow of `CalibrationStage` |
 | `EventLog` | `core/diagnostics/` | Bounded, in-memory, metadata-only history |
 
+### Sensor Mode
+
+Long-running microphone monitoring, so the screen does not have to stay on.
+
+| Type | Where | Responsibility |
+| --- | --- | --- |
+| `SensorModeService` | `service/` | The foreground service. `foregroundServiceType="microphone"` |
+| `SensorModeController` | `service/` | **The only way anything turns listening on or off.** Persists the desire, then asks the service |
+| `SensorModeNotifications` | `service/` | Status notification with Pause/Resume/Open App, plus the attention channel |
+| `SensorModeBootReceiver` | `service/` | Reacts to boot and upgrade. Deliberately does *not* start the service |
+| `DetectionSupervisor` | `core/sensormode/` | Restarts capture with a backoff when the microphone is lost. Pure |
+| `ListeningMode` | `core/sensormode/` | The *desired* state: OFF / LISTENING / PAUSED. Persisted |
+| `SensorHealth` | `core/sensormode/` | Everything the health screen needs. Pure, so the derivations are tested |
+| `SensorModeStore` | `data/` | Operational state: desired mode, timestamps, last error |
+| `SensorEnvironment` | `platform/` | Permissions and the battery exemption, read live |
+
+**Desired state and actual state are separate, and that separation is the design.**
+Android can refuse to run a microphone foreground service, and the gap between "the
+user wants this on" and "it is on" is what `SensorHealth.resumeRequired` reports. Never
+collapse the two.
+
+**Nothing starts listening except through `SensorModeController`,** called from
+something the user did while the app was visible. Starting a microphone foreground
+service requires while-in-use microphone access, which a visible activity grants and a
+background context does not.
+
+**The boot receiver must never start the service.** Android does not permit launching a
+microphone foreground service from a background receiver on current versions. The
+receiver posts a one-tap resume notification instead. Do not try to work around this.
+
+**No wake lock.** The device is plugged in, so Doze does not engage; `AudioRecord` plus
+the foreground service keeps the audio path alive. Adding a wake lock would add a
+resource to leak for no benefit.
+
 Detection runs on the **capture timeline** — timestamps derived from sample counts,
 not a clock — so it is immune to scheduling jitter and deterministic under test.
 `MonotonicClock` is used only to stamp the emitted `TriggerEvent`, because the rule
@@ -93,6 +127,21 @@ model's back.
 the single definition of how a room becomes a configuration, so improving the
 derivation later benefits everyone who has already calibrated. Do not persist the
 derived profile alongside the measurements.
+
+### Continuous-processing cost
+
+The per-sample arithmetic is already negligible — roughly 16,000 sample iterations a
+second, a rounding error on any phone. What costs battery on a device left running for
+weeks is **how often a thread wakes up**, so `AudioCaptureConfig.readBatchFrames` fetches
+several analysis frames per microphone read (64 ms by default) and slices the batch into
+frames sharing one buffer at different offsets. Analysis resolution is unchanged.
+
+The batch buffer is allocated fresh per read and never reused, so frames sharing it
+cannot be corrupted however far ahead the producer runs. Do not "optimise" that into a
+reused buffer: it crosses a dispatcher boundary.
+
+`ClapDiagnostics` publishing is gated on `subscriptionCount`, so a phone with no UI
+attached does no UI work at all.
 
 ### Adaptive behaviour
 
@@ -220,26 +269,37 @@ for claps, speech, music, door thuds and table knocks, and replays them through 
 Synthetic waveforms validate the logic, not real-world accuracy. Anything about
 sensitivity in a real room has to be measured on a device.
 
+## Requires user intervention
+
+Some things Android will not let the app fix by itself. These are product behaviour, not
+bugs, and the health screen exists to make each one a single tap:
+
+| Situation | Why | Recovery |
+| --- | --- | --- |
+| Device rebooted | A microphone foreground service cannot be started from a boot receiver | One tap on the resume notification |
+| App upgraded | The process is killed; same restriction applies | One tap |
+| Process killed | Sticky restart is attempted, but Android may refuse to re-promote | One tap, or automatic if the restart is allowed |
+| Microphone permission revoked | Retrying cannot grant a permission | Grant it, then Resume |
+| Another app takes the microphone | Transient | **Automatic**, with exponential backoff |
+| Notifications disabled | Service still runs, but Pause/Resume are unreachable | Health screen offers the request or settings |
+| OEM battery killer | Not exposed by any public API | Health screen guides to the exemption list |
+
 ## Current state
 
-Stage 2. Double clap detection works end to end on device: microphone to
-`TriggerEvent` to rule to a vibration. `VibrateAction` is local feedback and the
+Stage 3. Sensor Mode runs double clap detection in a foreground service, so the screen
+can be off. Detection works end to end on device: microphone to `TriggerEvent` to rule to
+a vibration. `VibrateAction` is local feedback and the
 only action that exists; Google Home, motion and gesture recognition are later
 stages with extension points but no implementations.
 
-Screens: dashboard, settings, `ui/calibration` — the guided flow — and `ui/claplab`,
+Screens: dashboard, settings, `ui/health` — setup and health checks — `ui/calibration`
+— the guided flow — and `ui/claplab`,
 a developer screen showing live level, the tracked background, the adaptive gate, the
 thresholds in force, rejection reasons and the event log.
 
 Sensitivity is exposed to users as **Low / Normal / High**; numeric thresholds are
 read-only on the developer screen. Do not put raw scalars in the settings screen —
 "0.63" tells nobody whether their claps will register.
-
-**Known limitation.** Android suspends microphone access for backgrounded apps, so
-detection only runs while the app is in the foreground. `AudioRecord` stays open and
-returns silence rather than failing. Always-on operation needs the foreground service
-planned for stage 3; until then, leaving detection running in the background costs
-battery and detects nothing.
 
 **Known limitation.** A dry, broadband impact — a hard strike on a table — clears
 every feature gate and is accepted as a clap. This is pinned by a test in

@@ -1,4 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shelfit Sentinel</string>
+
+    <string name="channel_status_name">Sensor Mode</string>
+    <string name="channel_status_description">Shown while the phone is listening for claps.</string>
+    <string name="channel_attention_name">Sensor Mode alerts</string>
+    <string name="channel_attention_description">Tells you when listening has stopped and needs you.</string>
+
+    <string name="notification_listening">Sensor Mode is listening</string>
+    <string name="notification_paused">Sensor Mode is paused</string>
+    <string name="notification_recovering">Microphone unavailable — retrying in %1$d s</string>
+    <string name="notification_permission_lost">Microphone permission was removed</string>
+
+    <string name="action_pause">Pause listening</string>
+    <string name="action_resume">Resume listening</string>
+    <string name="action_open_app">Open app</string>
+
+    <string name="notification_resume_title">Sensor Mode is paused</string>
+    <string name="notification_resume_text">Tap to resume listening</string>
+
+    <string name="notification_error_title">Sensor Mode needs attention</string>
+    <string name="notification_error_microphone_permission">Microphone access was removed. Tap to grant it again.</string>
+    <string name="notification_error_start_blocked">Android would not let listening start. Tap to try again.</string>
+    <string name="notification_error_microphone_busy">Another app is using the microphone. Retrying.</string>
+    <string name="notification_error_audio">Microphone capture failed. Tap for details.</string>
 </resources>

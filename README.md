@@ -6,11 +6,11 @@ A spare handset is left plugged in somewhere useful. It watches or listens for a
 physical cue — the first one being a **double clap** — and runs a configured
 action. All sensor interpretation happens on the device.
 
-## Status: stage 2 of 6 — double clap detection, calibrated per device
+## Status: stage 3 of 6 — always-on Sensor Mode
 
-Clapping twice works end to end on a real device: the microphone hears it, the
-detector confirms it, a rule matches it, and the phone buzzes. Nothing leaves the
-device and no audio is ever stored.
+Clapping twice works end to end on a real device, **with the screen off**: a foreground
+service holds the microphone, the detector confirms the gesture, a rule matches it, and
+the phone buzzes. Nothing leaves the device and no audio is ever stored.
 
 Microphones, room acoustics and noise floors differ enough that one fixed threshold
 cannot serve every phone, so detection is **calibrated**: a guided flow measures the
@@ -30,13 +30,16 @@ What exists:
 - Sensitivity as **Low / Normal / High**, with numeric thresholds shown read-only on
   a developer screen
 - A metadata-only event log — `18:43:12  Clap candidate  confidence 0.91`
-- 134 unit tests, including synthetic speech, music, doors, table knocks, changing
-  room noise and rapid transient bursts
-- A release build that passes R8 minification (~2.3 MB APK)
+- Sensor Mode: a `microphone` foreground service with Pause, Resume and Open App in its
+  notification, automatic recovery when another app takes the microphone, and a health
+  screen that names anything blocking unattended use
+- 167 unit tests, including synthetic speech, music, doors, table knocks, changing
+  room noise, rapid transient bursts and simulated microphone outages
+- A release build that passes R8 minification (~2.4 MB APK)
 
-**Detection runs only while the app is in the foreground.** Android suspends
-microphone access for backgrounded apps, so unattended operation needs the
-foreground service in stage 3.
+The intended device is an old phone left plugged in. The screen does not need to stay
+on, and nothing needs doing day to day — but Android reserves a few situations for the
+owner, listed under [What still needs you](#what-still-needs-you).
 
 ## How it fits together
 
@@ -147,20 +150,67 @@ triggers overnight.
 arrive within two seconds. A double clap is two and a triple is three, so it engages
 only on genuine bursts: applause, hammering, cutlery in a drawer.
 
+## Sensor Mode
+
+Turning Sensor Mode on starts a foreground service typed `microphone`. That is the only
+legitimate way to keep a microphone open with the screen off, and its notification is
+not an obstacle to route around — it is where Pause and Resume live, and how the owner
+of the phone can tell it is listening.
+
+Pausing releases the microphone but keeps the service alive, so Resume stays one tap
+away in the notification rather than requiring the app to be reopened.
+
+**Recovery.** A phone left running for weeks will lose the microphone occasionally: a
+call arrives, an assistant wakes, the audio server restarts. Capture is restarted with
+an exponential backoff — five seconds, then ten, then twenty, capped at five minutes —
+because the usual cause lasts seconds to minutes and retrying every second for the
+length of a phone call would waste power to no purpose. A revoked microphone permission
+is treated differently: retrying cannot grant a permission, so the app stops and says so
+instead of looping.
+
+**Battery.** No wake lock is taken. The device is plugged in, Doze does not engage while
+charging, and `AudioRecord` plus a foreground service keeps the audio path alive — so a
+wake lock would be one more resource to leak for no benefit. The microphone is read in
+64 ms batches rather than 16 ms ones: the arithmetic was never the cost, thread wake-ups
+are, and analysis resolution is unaffected.
+
+## What still needs you
+
+Android does not allow an app to start microphone monitoring by itself from the
+background, and that restriction is correct — a phone should not be able to start
+listening after a reboot without its owner knowing. So a few situations need one tap,
+and the app's job is to make it exactly one:
+
+| Situation | What happens | What you do |
+| --- | --- | --- |
+| Phone restarted | Notification: "Sensor Mode is paused — tap to resume listening" | One tap |
+| App updated | Same notification | One tap |
+| Process killed | A restart is attempted; if Android refuses, the same notification | One tap, often nothing |
+| Microphone permission revoked | Listening stops, notification explains | Grant it, then Resume |
+| Another app using the microphone | Retries on its own, backing off | Nothing |
+| Notifications switched off | Listening still works, but its controls are invisible | Health screen offers to fix it |
+| Phone stops listening by itself | Some manufacturers kill background apps regardless of foreground services | Exempt the app from battery optimisation |
+
+**Battery optimisation** is genuinely optional. Stock Android will not stop a listening
+foreground service for it, so the health screen says so rather than crying wolf. It
+matters on manufacturer builds that are more aggressive. The app links to Android's own
+exemption list rather than requesting a direct exemption dialog: that dialog needs the
+`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission, which Google Play restricts to a
+short list of app categories, and two extra taps is a better trade than a policy risk.
+
 ## Development stages
 
 | Stage | Scope | State |
 | --- | --- | --- |
 | **1. Architecture and shell** | Trigger/rule/action abstractions, Compose shell, dashboard, settings, navigation | **Done** |
 | **2. Double clap detection** | `AudioRecord` capture, feature-based clap detection, gesture timing, permission handling, developer tuning screen, local haptic feedback | **Done** |
-| **3. Always-on operation** | Foreground service so detection survives the UI closing, notification, boot restart, battery measurement over multi-day runs | Next |
-| **4. Actions** | `ActionExecutor` implementations and a rule editor so a trigger can be bound to a real action. Google Home integration belongs here | Planned |
+| **3. Always-on operation** | Foreground service, notification controls, boot and upgrade handling, automatic recovery, health screen | **Done** |
+| **4. Actions** | `ActionExecutor` implementations and a rule editor so a trigger can be bound to a real action. Google Home integration belongs here | Next |
 | **5. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Planned |
 | **6. Reliability** | Multi-week soak testing, false-positive tuning, thermal behaviour, recovery from revoked permissions | Planned |
 
-Stage 3 is independent of stage 4: detection is already proven by the built-in
-vibrate action, so always-on operation can be finished before any smart-home
-integration exists.
+Battery draw over multi-day runs, and false-positive rates in a real room, can only be
+measured on a physical device — that measurement belongs to stage 6.
 
 Deliberately **not** in scope yet: Google Home, motion detection, gesture
 recognition. The architecture has extension points for all three; none of them
@@ -174,7 +224,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 134 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 167 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```

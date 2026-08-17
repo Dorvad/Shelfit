@@ -433,6 +433,13 @@ private fun DiagnosticEvent.Kind.label(): String = when (this) {
     DiagnosticEvent.Kind.AMBIENT_THRESHOLD_RAISED -> "Threshold raised"
     DiagnosticEvent.Kind.CALIBRATION_SAVED -> "Calibration saved"
     DiagnosticEvent.Kind.CALIBRATION_CLEARED -> "Calibration cleared"
+    DiagnosticEvent.Kind.SENSOR_MODE_LISTENING -> "Sensor Mode listening"
+    DiagnosticEvent.Kind.SENSOR_MODE_PAUSED -> "Sensor Mode paused"
+    DiagnosticEvent.Kind.SERVICE_START_BLOCKED -> "Service start refused"
+    DiagnosticEvent.Kind.CAPTURE_RECOVERING -> "Capture recovering"
+    DiagnosticEvent.Kind.CAPTURE_RECOVERED -> "Capture recovered"
+    DiagnosticEvent.Kind.MICROPHONE_PERMISSION_LOST -> "Microphone permission lost"
+    DiagnosticEvent.Kind.RESUME_REQUIRED -> "Resume required"
 }
 
 private fun DoubleClapPhase.label(): String = when (this) {

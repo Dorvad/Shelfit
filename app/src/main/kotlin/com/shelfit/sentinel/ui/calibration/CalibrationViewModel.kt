@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.shelfit.sentinel.AppContainer
 import com.shelfit.sentinel.core.diagnostics.DiagnosticEvent
+import com.shelfit.sentinel.core.sensormode.ListeningMode
 import com.shelfit.sentinel.trigger.audio.CalibrationSpec
 import com.shelfit.sentinel.trigger.audio.CalibrationStage
 import com.shelfit.sentinel.trigger.audio.ClapCalibration
@@ -70,17 +71,18 @@ class CalibrationViewModel(private val container: AppContainer) : ViewModel() {
 
     private var measurementJob: Job? = null
 
-    /** Whether detection was running before we interrupted it, so it can be restored. */
-    private var wasDetecting = false
+    /** What Sensor Mode was doing before we took the microphone, so it can be put back. */
+    private var previousMode = ListeningMode.OFF
 
     fun start() {
         measurementJob?.cancel()
-        wasDetecting = container.triggerEngine.isRunning.value
-
-        // The calibrator and the detector share one AudioRecord source.
-        container.stopDetection()
 
         measurementJob = viewModelScope.launch {
+            // The calibrator, the detector and the service all share one AudioRecord
+            // source, and the microphone serves one client at a time.
+            previousMode = container.sensorModeController.releaseForExclusiveUse()
+            container.stopDetection()
+
             container.clapCalibrator
                 .run(CalibrationSpec(), container.wallClock.epochMillis())
                 .collect { stage ->
@@ -124,7 +126,7 @@ class CalibrationViewModel(private val container: AppContainer) : ViewModel() {
                     "${calibration.headroomDecibels.toInt()} dB headroom",
             )
             container.endTrial()
-            if (wasDetecting) container.startDetection()
+            container.sensorModeController.restore(previousMode)
             _step.value = CalibrationStep.Saved
         }
     }

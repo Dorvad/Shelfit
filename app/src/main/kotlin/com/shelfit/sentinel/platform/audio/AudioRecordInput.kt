@@ -39,6 +39,13 @@ import kotlinx.coroutines.flow.flowOn
  *
  * Reads block, so the producer runs on [Dispatchers.IO]; feature extraction stays on
  * whichever dispatcher collects the flow.
+ *
+ * **Batching.** One read fetches [AudioCaptureConfig.readSamples] and is sliced into
+ * several analysis frames sharing that buffer at different offsets. Analysis resolution
+ * is unchanged; what drops is the number of times the capture thread wakes up, which is
+ * the part of continuous monitoring that actually costs battery. The batch buffer is
+ * allocated fresh each read and never reused, so frames sharing it cannot be corrupted
+ * by the next read however far ahead the producer runs.
  */
 class AudioRecordInput(context: Context) : AudioInput {
 
@@ -67,24 +74,28 @@ class AudioRecordInput(context: Context) : AudioInput {
 
             var samplePosition = 0L
             while (true) {
-                // A fresh buffer per frame: 256 shorts is half a kilobyte, and it
-                // means no buffer is ever shared across a dispatcher boundary or
-                // outlives the analysis of its own frame.
-                val buffer = ShortArray(config.frameSamples)
+                val buffer = ShortArray(config.readSamples)
                 val read = record.read(buffer, 0, buffer.size)
 
                 if (read < 0) throw AudioInputUnavailableException(readErrorMessage(read))
                 if (read == 0) continue
 
-                emit(
-                    AudioFrame(
-                        samples = buffer,
-                        sampleCount = read,
-                        startTimestampMillis =
-                            samplePosition * MILLIS_PER_SECOND / config.sampleRateHz,
-                    ),
-                )
-                samplePosition += read
+                // Slice the batch into analysis frames. A short final slice is dropped
+                // rather than analysed: a partial frame would skew every level in it.
+                var offset = 0
+                while (offset + config.frameSamples <= read) {
+                    emit(
+                        AudioFrame(
+                            samples = buffer,
+                            sampleCount = config.frameSamples,
+                            startTimestampMillis =
+                                samplePosition * MILLIS_PER_SECOND / config.sampleRateHz,
+                            offset = offset,
+                        ),
+                    )
+                    samplePosition += config.frameSamples
+                    offset += config.frameSamples
+                }
             }
         } finally {
             // stop() throws if the device already stopped itself; releasing is what
@@ -108,10 +119,10 @@ class AudioRecordInput(context: Context) : AudioInput {
             )
         }
 
-        // Several frames of headroom so a scheduling hiccup drops no audio.
+        // Several batches of headroom so a scheduling hiccup drops no audio.
         val bufferBytes = maxOf(
             minimumBytes,
-            config.frameSamples * BYTES_PER_SAMPLE * BUFFERED_FRAMES,
+            config.readSamples * BYTES_PER_SAMPLE * BUFFERED_BATCHES,
         )
 
         for (source in preferredSources()) {
@@ -163,7 +174,7 @@ class AudioRecordInput(context: Context) : AudioInput {
 
     private companion object {
         const val BYTES_PER_SAMPLE = 2
-        const val BUFFERED_FRAMES = 8
+        const val BUFFERED_BATCHES = 3
         const val MILLIS_PER_SECOND = 1_000L
     }
 }

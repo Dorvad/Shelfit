@@ -11,6 +11,23 @@
     <!-- Local feedback on a confirmed detection. Install-time permission. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!--
+      Sensor Mode runs microphone monitoring in a foreground service. That is the only
+      legitimate way to keep the microphone open with the screen off, and its
+      notification is how the user pauses, resumes and sees that the phone is listening.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- Android 13+. Without it the service still runs, but its controls are invisible. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Used only to notice that the device restarted and offer to resume. The receiver
+      does not start the microphone service — see SensorModeBootReceiver.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
@@ -33,6 +50,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".service.SensorModeService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <receiver
+            android:name=".service.SensorModeBootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

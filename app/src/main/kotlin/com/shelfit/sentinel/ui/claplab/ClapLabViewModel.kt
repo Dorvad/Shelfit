@@ -79,12 +79,16 @@ class ClapLabViewModel(private val container: AppContainer) : ViewModel() {
         initialValue = ClapLabUiState(),
     )
 
+    /**
+     * Starts and stops through Sensor Mode rather than the engine directly, so the test
+     * screen exercises exactly the path production uses — foreground service included.
+     */
     fun toggleListening() {
         viewModelScope.launch {
             if (container.triggerEngine.isRunning.value) {
-                container.stopDetection()
+                container.sensorModeController.disable()
             } else {
-                container.startDetection()
+                container.sensorModeController.enable()
             }
         }
     }

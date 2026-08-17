@@ -1,5 +1,6 @@
 package com.shelfit.sentinel
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -20,12 +21,22 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
 
+    /**
+     * Set when the resume notification launched us, acted on in [onResume].
+     *
+     * Waiting for RESUMED is not ceremony: starting a microphone foreground service
+     * requires the app to hold while-in-use microphone access, and a visible, resumed
+     * activity is what grants it. Firing during onCreate risks Android refusing.
+     */
+    private var resumeRequested = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         val container = (application as SentinelApplication).container
 
+        readIntent(intent)
         observeKeepScreenOn(container)
 
         setContent {
@@ -33,6 +44,24 @@ class MainActivity : ComponentActivity() {
                 SentinelNavHost(container = container)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        readIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!resumeRequested) return
+        resumeRequested = false
+
+        val container = (application as SentinelApplication).container
+        lifecycleScope.launch { container.sensorModeController.enable() }
+    }
+
+    private fun readIntent(intent: Intent?) {
+        if (intent?.action == ACTION_RESUME_SENSOR_MODE) resumeRequested = true
     }
 
     /**
@@ -55,5 +84,14 @@ class MainActivity : ComponentActivity() {
                     }
             }
         }
+    }
+
+    companion object {
+        /**
+         * Sent by the "tap to resume listening" notification. One tap is the fewest
+         * Android allows: the microphone service cannot be started from the
+         * notification itself.
+         */
+        const val ACTION_RESUME_SENSOR_MODE = "com.shelfit.sentinel.action.RESUME_SENSOR_MODE"
     }
 }

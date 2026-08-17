@@ -5,19 +5,25 @@ import com.shelfit.sentinel.core.WallClock
 import com.shelfit.sentinel.core.action.ActionDispatcher
 import com.shelfit.sentinel.core.diagnostics.EventLog
 import com.shelfit.sentinel.core.rule.AutomationCoordinator
+import com.shelfit.sentinel.core.sensormode.SensorModeError
+import com.shelfit.sentinel.core.sensormode.SensorModeRuntime
 import com.shelfit.sentinel.core.sensor.SensorStatusProvider
 import com.shelfit.sentinel.core.trigger.TriggerEngine
 import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.core.trigger.TriggerRegistry
 import com.shelfit.sentinel.data.RuleRepository
+import com.shelfit.sentinel.data.SensorHealthRepository
+import com.shelfit.sentinel.data.SensorModeStore
 import com.shelfit.sentinel.data.SettingsRepository
 import com.shelfit.sentinel.data.triggerConfigurations
 import com.shelfit.sentinel.platform.AndroidSensorStatusProvider
 import com.shelfit.sentinel.platform.LogActionExecutor
+import com.shelfit.sentinel.platform.SensorEnvironment
 import com.shelfit.sentinel.platform.SystemMonotonicClock
 import com.shelfit.sentinel.platform.SystemWallClock
 import com.shelfit.sentinel.platform.VibrationActionExecutor
 import com.shelfit.sentinel.platform.audio.AudioRecordInput
+import com.shelfit.sentinel.service.SensorModeController
 import com.shelfit.sentinel.trigger.audio.ClapCalibrator
 import com.shelfit.sentinel.trigger.audio.DoubleClapConfiguration
 import com.shelfit.sentinel.trigger.audio.DoubleClapDetector
@@ -25,6 +31,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Manual dependency container, held by [SentinelApplication] for the process
@@ -51,6 +58,14 @@ class AppContainer(context: Context) {
     val settingsRepository = SettingsRepository(context)
 
     val ruleRepository = RuleRepository()
+
+    /** Operational state for Sensor Mode: the desired mode, timestamps, last error. */
+    val sensorModeStore = SensorModeStore(context)
+
+    /** Whether the foreground service exists in this process. */
+    val sensorModeRuntime = SensorModeRuntime()
+
+    val sensorEnvironment = SensorEnvironment(context)
 
     /**
      * Metadata-only history of detector decisions, kept in memory for the lifetime of
@@ -112,10 +127,34 @@ class AppContainer(context: Context) {
         scope = applicationScope,
     )
 
+    /** The single entry point for turning listening on and off. */
+    val sensorModeController = SensorModeController(
+        context = context,
+        store = sensorModeStore,
+        clock = wallClock,
+    )
+
+    val sensorHealthRepository = SensorHealthRepository(
+        store = sensorModeStore,
+        environment = sensorEnvironment,
+        runtime = sensorModeRuntime,
+        engine = triggerEngine,
+    )
+
     init {
         // Cheap to leave running: it only suspends on the engine's event flow, which
         // produces nothing until a detector is started.
         automationCoordinator.start()
+    }
+
+    /**
+     * Persists an error from a component that is about to stop.
+     *
+     * The service cannot use its own scope for this — it may be being destroyed — so the
+     * write is handed to the scope that owns the stores.
+     */
+    fun recordSensorModeError(error: SensorModeError) {
+        applicationScope.launch { sensorModeStore.recordError(error) }
     }
 
     /**
