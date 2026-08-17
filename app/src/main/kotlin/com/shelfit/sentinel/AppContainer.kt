@@ -34,6 +34,7 @@ import com.shelfit.sentinel.platform.smarthome.SelectableSmartHomeClient
 import com.shelfit.sentinel.platform.smarthome.SimulatedSmartHomeClient
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCloudClient
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCredentials
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaLanDiscovery
 import com.shelfit.sentinel.service.SensorModeController
 import com.shelfit.sentinel.trigger.audio.ClapCalibrator
 import com.shelfit.sentinel.trigger.audio.DoubleClapConfiguration
@@ -108,6 +109,15 @@ class AppContainer(context: Context) {
      */
     @Volatile
     private var tuyaCredentials = TuyaCredentials()
+
+    /**
+     * Finds Tuya devices announcing themselves on the LAN.
+     *
+     * Independent of the cloud client on purpose: it works before any account exists, and its
+     * job right now is to tell the user which protocol version their devices speak — the fact
+     * that decides how local control gets implemented. See `docs/tuya-lan.md`.
+     */
+    val tuyaLanDiscovery = TuyaLanDiscovery()
 
     /** The chosen home's devices, shared by the connect screen and the rule editor. */
     val smartHomeDirectory = SmartHomeDirectory(smartHomeClient, applicationScope)

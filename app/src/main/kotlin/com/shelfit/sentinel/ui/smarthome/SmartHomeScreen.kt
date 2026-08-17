@@ -70,6 +70,7 @@ fun SmartHomeRoute(
         onProvider = viewModel::setProvider,
         onSaveTuya = viewModel::saveTuyaCredentials,
         onClearTuya = viewModel::clearTuyaCredentials,
+        onScanLan = viewModel::scanLocalNetwork,
         onSimulatorFault = viewModel::setSimulatorFault,
         onNavigateBack = onNavigateBack,
     )
@@ -94,6 +95,7 @@ fun SmartHomeScreen(
     onProvider: (SmartHomeProvider) -> Unit,
     onSaveTuya: (String, String, TuyaRegion) -> Unit,
     onClearTuya: () -> Unit,
+    onScanLan: () -> Unit,
     onSimulatorFault: (SimulatedSmartHomeClient.Fault) -> Unit,
     onNavigateBack: () -> Unit,
 ) {
@@ -152,6 +154,10 @@ fun SmartHomeScreen(
 
             if (uiState.connected) {
                 DeviceCard(uiState = uiState, onReload = onReloadDevices)
+            }
+
+            if (uiState.provider == SmartHomeProvider.TUYA) {
+                LanScanCard(uiState = uiState, onScanLan = onScanLan)
             }
 
             if (uiState.provider == SmartHomeProvider.SIMULATED) {
@@ -407,6 +413,78 @@ private fun TuyaCard(
 }
 
 /**
+ * Devices found announcing themselves on the LAN.
+ *
+ * Diagnostic, not control: local switching is not implemented yet, and the protocol version
+ * shown here is the fact that decides how it will be. Listing a device the app cannot yet
+ * drive is still useful — promising one it cannot would not be.
+ */
+@Composable
+private fun LanScanCard(uiState: SmartHomeUiState, onScanLan: () -> Unit) {
+    SectionCard("Local network") {
+        Text(
+            text = "Tuya devices announce themselves on your Wi-Fi. Scanning finds them " +
+                "without any account, and reports which protocol each one speaks.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        val found = uiState.lanDevices
+        when {
+            uiState.lanScanning && found.isNullOrEmpty() -> Text(
+                text = "Listening…",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            found == null -> Unit
+
+            found.isEmpty() -> Text(
+                text = "No devices answered. Check the phone is on the same Wi-Fi as the " +
+                    "devices, and that the router does not have client isolation or " +
+                    "\"AP isolation\" switched on.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+
+            else -> found.forEach { device -> LanDeviceRow(device) }
+        }
+
+        Button(
+            onClick = onScanLan,
+            enabled = !uiState.lanScanning,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (uiState.lanScanning) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp))
+            } else {
+                Text(if (found == null) "Scan local network" else "Scan again")
+            }
+        }
+
+        if (!found.isNullOrEmpty()) {
+            Text(
+                text = "Local switching is not built yet — these are listed so you can see " +
+                    "which protocol version you have. See docs/tuya-lan.md.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LanDeviceRow(device: LanDeviceRowUi) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(device.ip, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            text = "${device.protocolLabel} · ${device.deviceId}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
  * Faults the simulated home can be made to produce.
  *
  * Only shown when the simulator is the chosen provider — it is a developer tool, and its
@@ -473,6 +551,7 @@ private fun SmartHomeScreenPreview() {
             onProvider = {},
             onSaveTuya = { _, _, _ -> },
             onClearTuya = {},
+            onScanLan = {},
             onSimulatorFault = {},
             onNavigateBack = {},
         )

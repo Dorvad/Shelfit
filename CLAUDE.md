@@ -237,6 +237,7 @@ types, and it is enforced by `PipelineBoundaryTest`.
 | `SmartHomeActionExecutor` | `core/action/` | Turns the action into commands. In `core/` because it needs no Android |
 | `TuyaCloudClient` | `platform/smarthome/tuya/` | **The working provider.** Tuya Cloud API over `HttpsURLConnection` |
 | `TuyaCloudApi` / `TuyaSignature` | `platform/smarthome/tuya/` | Signed HTTP and the HMAC-SHA256 signing, which is pure and unit-tested |
+| `TuyaLanDiscovery` / `TuyaLanPacket` | `platform/smarthome/tuya/` | Passive LAN discovery: finds devices, IPs and protocol versions with no account |
 | `GoogleHomeClient` | `platform/smarthome/` | Where the Home APIs SDK goes. **Currently reports `NotConfigured`** |
 | `SimulatedSmartHomeClient` | `platform/smarthome/` | A pretend home for development |
 | `SelectableSmartHomeClient` | `platform/smarthome/` | Routes to the provider named by `SmartHomeProvider` |
@@ -359,6 +360,10 @@ Unit tests use `kotlinx-coroutines-test`; fakes live in
 `app/src/test/kotlin/com/shelfit/sentinel/core/Fakes.kt`. There are no
 instrumented tests yet.
 
+`org.json` is a **test-scope** dependency. Android bundles it, but the JVM unit-test stub throws
+"not mocked" on every method, so response and packet parsing would be untestable without it.
+That is not a relaxation of the few-dependencies rule — nothing is added to the APK.
+
 Audio is tested without a microphone. `SyntheticAudio.kt` generates seeded waveforms
 for claps, speech, music, door thuds and table knocks, and replays them through the
 `AudioInput` interface. Two levels matter:
@@ -450,9 +455,23 @@ rather than shipping a configuration that cannot succeed.
 
 **Known limitation.** Tuya's IoT Core connection service is a one-month free trial, extendable
 free on request. When it lapses the API stops answering and automations stop switching — the app
-reports it, but it has still stopped. This is the strongest argument for adding local LAN control,
-which would also remove the cloud round trip. Local control needs a per-device key that only the
-cloud API supplies, so the cloud setup is a prerequisite either way.
+reports it, but it has still stopped.
+
+Local LAN control would remove that and the cloud round trip. **Discovery is built** —
+`TuyaLanDiscovery` finds devices, IPs and protocol versions with no account, and the decoder is
+tested against packets the tests construct. Control is not, and the work differs by roughly a
+factor of three between protocol 3.3 (AES-ECB, CRC32) and 3.4/3.5 (session handshake, HMAC or
+GCM). Implement the versions the user actually has rather than all four blind.
+
+`TuyaLanAnnouncement.controlSupported` returns an empty version set on purpose: the UI may list a
+device it cannot yet switch, but must never claim it can. **That flag is the thing to flip** as
+each version lands.
+
+The LAN protocol is undocumented and community-reverse-engineered, so unlike the cloud signature
+it cannot be verified against a specification — framing and crypto round-trips are unit-testable,
+but acceptance is only provable against hardware. Keep the discovery decoder forgiving: it tries
+the plausible readings of a datagram and keeps whichever parses, which is why an unexpected frame
+shape still finds the device.
 
 **Known limitation.** Google Home cannot be reached at all. `GoogleHomeClient` reports
 `NotConfigured`; the SDK is not obtainable from this repository and the Home APIs need a Nest hub.

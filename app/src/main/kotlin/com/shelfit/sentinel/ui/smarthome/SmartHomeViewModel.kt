@@ -17,6 +17,7 @@ import com.shelfit.sentinel.core.smarthome.StructureId
 import com.shelfit.sentinel.core.smarthome.describe
 import com.shelfit.sentinel.platform.smarthome.SimulatedSmartHomeClient
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCredentials
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaLanAnnouncement
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaRegion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** One device as the list shows it. */
 data class DeviceRowUi(
@@ -37,6 +39,15 @@ data class DeviceRowUi(
     val reachable: Boolean,
     /** False when this device cannot be toggled, only switched on or off. */
     val stateKnown: Boolean,
+)
+
+/** A device found announcing itself on the local network. */
+data class LanDeviceRowUi(
+    val deviceId: String,
+    val ip: String,
+    val protocolLabel: String,
+    /** False while local control is unimplemented — see docs/tuya-lan.md. */
+    val controlSupported: Boolean,
 )
 
 /** What the screen needs to explain the connection and what to do about it. */
@@ -57,6 +68,9 @@ data class SmartHomeUiState(
     val tuyaConfigured: Boolean = false,
     val tuyaRegion: TuyaRegion = TuyaRegion.Default,
     val simulatorFault: SimulatedSmartHomeClient.Fault = SimulatedSmartHomeClient.Fault.NONE,
+    val lanScanning: Boolean = false,
+    /** Null until a scan has been run, so "not scanned" differs from "found nothing". */
+    val lanDevices: List<LanDeviceRowUi>? = null,
 )
 
 /**
@@ -73,13 +87,34 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
 
     private val connecting = MutableStateFlow(false)
 
+    private val lanScanning = MutableStateFlow(false)
+    private val lanDevices = MutableStateFlow<List<LanDeviceRowUi>?>(null)
+
+    /**
+     * Assembled from six sources.
+     *
+     * Past `combine`'s five typed overloads, so this uses the array form and casts. Ugly, and
+     * still better than nesting two combines — which would recompose the screen twice for one
+     * change and make the ordering hard to follow.
+     */
+    @Suppress("UNCHECKED_CAST")
     val uiState: StateFlow<SmartHomeUiState> = combine(
         client.state,
         container.smartHomeDirectory.devices,
         container.settingsRepository.settings,
         connecting,
         container.simulatedSmartHome.fault,
-    ) { connection, deviceList, settings, isConnecting, fault ->
+        lanScanning,
+        lanDevices,
+    ) { values ->
+        val connection = values[0] as SmartHomeState
+        val deviceList = values[1] as SmartHomeDeviceList
+        val settings = values[2] as com.shelfit.sentinel.data.SentinelSettings
+        val isConnecting = values[3] as Boolean
+        val fault = values[4] as SimulatedSmartHomeClient.Fault
+        val scanning = values[5] as Boolean
+        val lan = values[6] as List<LanDeviceRowUi>?
+
         SmartHomeUiState(
             providerAvailable = client.available,
             connectionLabel = connection.label(),
@@ -96,6 +131,8 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
             tuyaConfigured = settings.tuya.complete,
             tuyaRegion = settings.tuya.region,
             simulatorFault = fault,
+            lanScanning = scanning,
+            lanDevices = lan,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -169,6 +206,43 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Listens for local announcements for a few seconds and reports what turned up.
+     *
+     * Time-boxed rather than continuous: devices rebroadcast every few seconds, so a short
+     * window finds everything awake, and leaving three sockets open on a phone that runs for
+     * weeks would be a leak for no benefit.
+     *
+     * Results accumulate as they arrive so a slow device still appears, and are keyed by id
+     * because a device announces repeatedly and on more than one port.
+     */
+    fun scanLocalNetwork() {
+        if (lanScanning.value) return
+        lanScanning.value = true
+        lanDevices.value = emptyList()
+
+        viewModelScope.launch {
+            val found = linkedMapOf<String, TuyaLanAnnouncement>()
+            withTimeoutOrNull(SCAN_MILLIS) {
+                container.tuyaLanDiscovery.announcements().collect { announcement ->
+                    found[announcement.deviceId] = announcement
+                    lanDevices.value = found.values.map(::toLanRow)
+                }
+            }
+            lanDevices.value = found.values.map(::toLanRow)
+            lanScanning.value = false
+        }
+    }
+
+    private fun toLanRow(announcement: TuyaLanAnnouncement) = LanDeviceRowUi(
+        deviceId = announcement.deviceId,
+        ip = announcement.ip,
+        protocolLabel = announcement.protocolVersion
+            ?.let { "Protocol $it" }
+            ?: "Protocol not reported",
+        controlSupported = announcement.controlSupported,
+    )
+
     fun setSimulatorFault(fault: SimulatedSmartHomeClient.Fault) =
         container.simulatedSmartHome.setFault(fault)
 
@@ -190,6 +264,9 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
 
     companion object {
         private const val STOP_TIMEOUT_MILLIS = 5_000L
+
+        /** Long enough for every awake device to rebroadcast at least once. */
+        private const val SCAN_MILLIS = 8_000L
 
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer { SmartHomeViewModel(container) }

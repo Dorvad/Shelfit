@@ -67,4 +67,9 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // Test scope only, and not a relaxation of the "few dependencies" rule: org.json ships
+    // inside Android, but the JVM unit-test stub throws "not mocked" on every method. This
+    // supplies the real implementation so response parsing can be tested without a device.
+    testImplementation(libs.json)
 }

@@ -47,10 +47,11 @@ What exists:
   actions: vibrate, show a notification, write to the log
 - A smart-home action: choose devices, choose on/off/toggle, get per-device results
   including partial success — working against Tuya, with three providers behind one interface
-- 291 unit tests, including synthetic speech, music, doors, table knocks, changing
+- Passive LAN discovery of Tuya devices — no account, nothing sent, listens only
+- 306 unit tests, including synthetic speech, music, doors, table knocks, changing
   room noise, rapid transient bursts, simulated microphone outages, the full
-  clap → rule → executor path, every smart-home failure condition, and the Tuya request
-  signature
+  clap → rule → executor path, every smart-home failure condition, the Tuya request
+  signature, and LAN discovery packets in every frame format
 - A release build that passes R8 minification (~2.4 MB APK)
 
 The intended device is an old phone left plugged in. The screen does not need to stay
@@ -263,7 +264,7 @@ short list of app categories, and two extra taps is a better trade than a policy
 | **3. Always-on operation** | Foreground service, notification controls, boot and upgrade handling, automatic recovery, health screen | **Done** |
 | **4. Actions** | Rule editor, persisted rules, local debug actions | **Done** |
 | **5. Smart home** | A smart home as an action provider: connect, pick devices, on/off/toggle | **Done** — Tuya working, Google blocked on its SDK |
-| **6. Local device control** | Tuya over the LAN — removes the cloud round trip and the trial expiry | Candidate |
+| **6. Local device control** | Tuya over the LAN — removes the cloud round trip and the trial expiry | Discovery **done**, control next |
 | **7. Additional triggers** | Ambient light and accelerometer first (cheap, no camera permission), then camera motion, then hand gestures | Next |
 | **8. Reliability** | Multi-week soak testing, false-positive tuning, thermal behaviour, recovery from revoked permissions | Planned |
 
@@ -287,8 +288,11 @@ for two ABIs and an embedded V8 engine into an app built to run quietly on an ol
 weeks. Three REST endpoints, `javax.crypto` for signing and `org.json` for parsing cost nothing.
 
 One wart worth knowing: Tuya's IoT Core service is a **one-month free trial**, extendable free on
-request. Local LAN control would remove both that and the cloud round trip, and is the obvious
-next step.
+request. Local LAN control removes both that and the cloud round trip, and is the next step:
+**discovery is already built** — the app finds Tuya devices on the Wi-Fi, with their IPs and
+protocol versions, using no account at all. [`docs/tuya-lan.md`](docs/tuya-lan.md) covers what
+local control needs, including the one thing that genuinely requires the cloud once: the
+per-device local key.
 
 Deliberately **not** in scope yet: motion detection and gesture recognition. The architecture
 has extension points for both; neither has a speculative implementation.
@@ -301,7 +305,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 291 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 306 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```
