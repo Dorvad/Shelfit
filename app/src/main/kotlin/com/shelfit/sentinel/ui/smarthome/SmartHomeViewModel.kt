@@ -10,6 +10,7 @@ import com.shelfit.sentinel.core.smarthome.DeviceKind
 import com.shelfit.sentinel.core.smarthome.SmartHomeDevice
 import com.shelfit.sentinel.core.smarthome.SmartHomeDeviceList
 import com.shelfit.sentinel.core.smarthome.SmartHomeFailure
+import com.shelfit.sentinel.core.smarthome.SmartHomeResult
 import com.shelfit.sentinel.core.smarthome.SmartHomeState
 import com.shelfit.sentinel.core.smarthome.SmartHomeProvider
 import com.shelfit.sentinel.core.smarthome.SmartHomeStructure
@@ -18,6 +19,7 @@ import com.shelfit.sentinel.core.smarthome.describe
 import com.shelfit.sentinel.platform.smarthome.SimulatedSmartHomeClient
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaCredentials
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaLanAnnouncement
+import com.shelfit.sentinel.platform.smarthome.tuya.TuyaLocalCredential
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaRegion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -50,6 +52,13 @@ data class LanDeviceRowUi(
     val controlSupported: Boolean,
 )
 
+/** One device's local key, for setting up LAN control later. */
+data class LocalKeyRowUi(
+    val name: String,
+    val deviceId: String,
+    val localKey: String,
+)
+
 /** What the screen needs to explain the connection and what to do about it. */
 data class SmartHomeUiState(
     val providerAvailable: Boolean = false,
@@ -71,6 +80,9 @@ data class SmartHomeUiState(
     val lanScanning: Boolean = false,
     /** Null until a scan has been run, so "not scanned" differs from "found nothing". */
     val lanDevices: List<LanDeviceRowUi>? = null,
+    /** Null until the user asks. Local keys are credentials, not something to show by default. */
+    val localKeys: List<LocalKeyRowUi>? = null,
+    val localKeysProblem: String? = null,
 )
 
 /**
@@ -89,6 +101,8 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
 
     private val lanScanning = MutableStateFlow(false)
     private val lanDevices = MutableStateFlow<List<LanDeviceRowUi>?>(null)
+    private val localKeys = MutableStateFlow<List<LocalKeyRowUi>?>(null)
+    private val localKeysProblem = MutableStateFlow<String?>(null)
 
     /**
      * Assembled from six sources.
@@ -106,6 +120,8 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
         container.simulatedSmartHome.fault,
         lanScanning,
         lanDevices,
+        localKeys,
+        localKeysProblem,
     ) { values ->
         val connection = values[0] as SmartHomeState
         val deviceList = values[1] as SmartHomeDeviceList
@@ -114,6 +130,8 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
         val fault = values[4] as SimulatedSmartHomeClient.Fault
         val scanning = values[5] as Boolean
         val lan = values[6] as List<LanDeviceRowUi>?
+        val keys = values[7] as List<LocalKeyRowUi>?
+        val keysProblem = values[8] as String?
 
         SmartHomeUiState(
             providerAvailable = client.available,
@@ -133,6 +151,8 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
             simulatorFault = fault,
             lanScanning = scanning,
             lanDevices = lan,
+            localKeys = keys,
+            localKeysProblem = keysProblem,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -242,6 +262,42 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
             ?: "Protocol not reported",
         controlSupported = announcement.controlSupported,
     )
+
+    /**
+     * Fetches the per-device local keys, for setting up LAN control later.
+     *
+     * Only on request. These are credentials — showing them beside the device list by default
+     * would put a secret on screen every time somebody opened settings.
+     */
+    fun revealLocalKeys() {
+        localKeysProblem.value = null
+        viewModelScope.launch {
+            when (val result = container.tuyaCloudClient.localCredentials()) {
+                is SmartHomeResult.Success -> {
+                    localKeys.value = result.value
+                        .filter(TuyaLocalCredential::usable)
+                        .map { LocalKeyRowUi(it.name, it.deviceId, it.localKey) }
+                    if (localKeys.value.isNullOrEmpty()) {
+                        localKeysProblem.value =
+                            "Connected, but no local keys came back. This usually means the " +
+                            "app account is not linked to the cloud project."
+                    }
+                }
+
+                is SmartHomeResult.Failure -> {
+                    localKeys.value = null
+                    localKeysProblem.value =
+                        "Could not read the keys: ${result.failure.kind.describe()}."
+                }
+            }
+        }
+    }
+
+    /** Clears the keys from the screen. They are re-fetched, never cached. */
+    fun hideLocalKeys() {
+        localKeys.value = null
+        localKeysProblem.value = null
+    }
 
     fun setSimulatorFault(fault: SimulatedSmartHomeClient.Fault) =
         container.simulatedSmartHome.setFault(fault)

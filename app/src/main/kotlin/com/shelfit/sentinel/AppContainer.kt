@@ -82,16 +82,24 @@ class AppContainer(context: Context) {
     val simulatedSmartHome = SimulatedSmartHomeClient()
 
     /**
+     * Tuya as its own type, so the settings screen can read the local keys for LAN setup.
+     *
+     * Same concession as [simulatedSmartHome]: one screen needs a provider-specific capability,
+     * and putting it on [SmartHomeClient] would make every provider implement it.
+     */
+    val tuyaCloudClient = TuyaCloudClient { tuyaCredentials }
+
+    /**
      * The one place smart-home providers are registered.
      *
-     * [TuyaCloudClient] is the working one. [GoogleHomeClient] reports "not configured" until
-     * the Home APIs SDK is in the build, and the simulator is a developer aid. Everything
-     * above this holds the interface, which is why adding Tuya changed no audio code, no rule
-     * code and no screen outside the smart-home settings.
+     * Tuya is the working one. [GoogleHomeClient] reports "not configured" until the Home APIs
+     * SDK is in the build, and the simulator is a developer aid. Everything above this holds the
+     * interface, which is why adding Tuya changed no audio code, no rule code and no screen
+     * outside the smart-home settings.
      */
     val smartHomeClient: SmartHomeClient = SelectableSmartHomeClient(
         clients = mapOf(
-            SmartHomeProvider.TUYA to TuyaCloudClient { tuyaCredentials },
+            SmartHomeProvider.TUYA to tuyaCloudClient,
             SmartHomeProvider.GOOGLE to GoogleHomeClient(),
             SmartHomeProvider.SIMULATED to simulatedSmartHome,
             // SmartHomeProvider.NONE is deliberately absent — the router serves it with a

@@ -1,6 +1,7 @@
 package com.shelfit.sentinel.ui.smarthome
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -71,6 +73,8 @@ fun SmartHomeRoute(
         onSaveTuya = viewModel::saveTuyaCredentials,
         onClearTuya = viewModel::clearTuyaCredentials,
         onScanLan = viewModel::scanLocalNetwork,
+        onRevealKeys = viewModel::revealLocalKeys,
+        onHideKeys = viewModel::hideLocalKeys,
         onSimulatorFault = viewModel::setSimulatorFault,
         onNavigateBack = onNavigateBack,
     )
@@ -96,6 +100,8 @@ fun SmartHomeScreen(
     onSaveTuya: (String, String, TuyaRegion) -> Unit,
     onClearTuya: () -> Unit,
     onScanLan: () -> Unit,
+    onRevealKeys: () -> Unit,
+    onHideKeys: () -> Unit,
     onSimulatorFault: (SimulatedSmartHomeClient.Fault) -> Unit,
     onNavigateBack: () -> Unit,
 ) {
@@ -158,6 +164,14 @@ fun SmartHomeScreen(
 
             if (uiState.provider == SmartHomeProvider.TUYA) {
                 LanScanCard(uiState = uiState, onScanLan = onScanLan)
+            }
+
+            if (uiState.provider == SmartHomeProvider.TUYA && uiState.connected) {
+                LocalKeysCard(
+                    uiState = uiState,
+                    onReveal = onRevealKeys,
+                    onHide = onHideKeys,
+                )
             }
 
             if (uiState.provider == SmartHomeProvider.SIMULATED) {
@@ -488,6 +502,85 @@ private fun LanDeviceRow(device: LanDeviceRowUi) {
 }
 
 /**
+ * Per-device local keys, for setting up LAN control later.
+ *
+ * Hidden until asked for, and not held anywhere after: these are credentials, and putting one on
+ * screen every time somebody opens settings would be careless. Fetched fresh each time rather
+ * than cached, so nothing is retained beyond the moment it is displayed.
+ */
+@Composable
+private fun LocalKeysCard(
+    uiState: SmartHomeUiState,
+    onReveal: () -> Unit,
+    onHide: () -> Unit,
+) {
+    SectionCard("Local keys") {
+        Text(
+            text = "Local control needs one secret per device, and only the cloud has it. " +
+                "You need these once — write them down somewhere safe.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        uiState.localKeysProblem?.let { problem ->
+            Text(
+                text = problem,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        val keys = uiState.localKeys
+        if (keys.isNullOrEmpty()) {
+            Button(onClick = onReveal, modifier = Modifier.fillMaxWidth()) {
+                Text("Show local keys")
+            }
+        } else {
+            keys.forEach { key ->
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    Text(key.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = "Local key",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    // Selectable so the value can be copied out rather than transcribed by eye.
+                    SelectionContainer {
+                        Text(
+                            text = key.localKey,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    Text(
+                        text = "Device ID",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    SelectionContainer {
+                        Text(
+                            text = key.deviceId,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+                HorizontalDivider()
+            }
+            OutlinedButton(onClick = onHide, modifier = Modifier.fillMaxWidth()) {
+                Text("Hide")
+            }
+            Text(
+                text = "Treat these like passwords. Anyone on your Wi-Fi with a device key can " +
+                    "switch that device. They change if you reset or re-pair it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/**
  * Faults the simulated home can be made to produce.
  *
  * Only shown when the simulator is the chosen provider — it is a developer tool, and its
@@ -555,6 +648,8 @@ private fun SmartHomeScreenPreview() {
             onSaveTuya = { _, _, _ -> },
             onClearTuya = {},
             onScanLan = {},
+            onRevealKeys = {},
+            onHideKeys = {},
             onSimulatorFault = {},
             onNavigateBack = {},
         )

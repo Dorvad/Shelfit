@@ -205,6 +205,38 @@ class TuyaCloudClient(
         }
     }
 
+    /**
+     * The local keys for every device, for setting up LAN control later.
+     *
+     * A Tuya-only method rather than part of [SmartHomeClient]: a local key is a vendor concept,
+     * and widening the shared interface to carry one would push it through the whole app to
+     * serve a single settings screen.
+     *
+     * Read from the same device list [devices] uses, so it costs one extra call rather than a
+     * second integration. Nothing is cached and nothing is logged — the keys are handed to the
+     * caller and forgotten.
+     */
+    suspend fun localCredentials(): SmartHomeResult<List<TuyaLocalCredential>> {
+        val account = uid ?: return SmartHomeResult.Failure(
+            SmartHomeFailure(SmartHomeFailure.Kind.NOT_CONNECTED),
+        )
+
+        return when (val response = api.get("/v1.0/users/$account/devices")) {
+            is TuyaResponse.Error -> SmartHomeResult.Failure(response.failure)
+
+            is TuyaResponse.Ok -> SmartHomeResult.Success(
+                response.json.optJSONArray("result").objects().map { json ->
+                    TuyaLocalCredential(
+                        deviceId = json.optString("id"),
+                        name = json.optString("name").ifEmpty { "Unnamed device" },
+                        localKey = json.optString("local_key"),
+                        ip = json.optString("ip").ifEmpty { null },
+                    )
+                },
+            )
+        }
+    }
+
     private fun toDevice(json: JSONObject): SmartHomeDevice {
         val status = json.optJSONArray("status").objects()
         val switchEntry = status.firstOrNull { it.optString("code").isSwitchCode() }
