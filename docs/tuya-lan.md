@@ -36,6 +36,46 @@ still free, possibly needing an extension request.
 
 ---
 
+## Wi-Fi devices and hub sub-devices are not the same problem
+
+Learned from a real home, and easy to miss: a Tuya account is often mostly **Zigbee devices
+behind one gateway**, not Wi-Fi devices. In the case that prompted this section, about seventeen
+devices resolved to four on Wi-Fi and seven hanging off a single Multi-mode Gateway — including
+both devices the user actually wanted to clap-control.
+
+The distinction decides whether local control can address a device at all:
+
+| | Wi-Fi device | Hub sub-device |
+| --- | --- | --- |
+| Has its own IP | Yes | **No** |
+| Appears in the LAN scan | Yes | No |
+| Local control | Direct, by protocol version | Must be **routed through the gateway**, addressed by `node_id` (Tuya calls it `cid`) |
+| Cloud control | Works | Works — the cloud routes through the hub for you |
+
+**The cloud reaches sub-devices transparently; local control does not.** That asymmetry is the
+single strongest argument for keeping the cloud client as the fallback rather than replacing it:
+a home whose lights are all Zigbee gains nothing from direct LAN control alone.
+
+`TuyaLocalCredential.fromDeviceList` works out which is which. Tuya reports `sub` reliably but
+the parent only sometimes, so the parent falls back to the heuristic `tinytuya` uses, whose own
+comment explains an otherwise arbitrary rule: *"The only link between parent and child appears
+to be the local key."* Tuya hands a sub-device the same local key as its hub, so a sub-device
+whose key matches a non-sub device has found its parent. A hub must be excluded from matching
+itself — it shares its key with its children by definition.
+
+### Implement in this order
+
+Doing all the variants at once means handing over a large lump that cannot be debugged. Each
+step below is provable on hardware before the next is worth starting:
+
+1. **Protocol 3.3, direct.** Smallest wire format, and it proves the framing and crypto against
+   a real device.
+2. **Protocol 3.4, direct.** Adds HMAC-SHA256 and the session handshake to a frame layer that
+   is by then known good.
+3. **Gateway routing.** Sub-device addressing on top of a working 3.4, for the Zigbee devices.
+
+---
+
 ## What local control requires
 
 ### Per device
