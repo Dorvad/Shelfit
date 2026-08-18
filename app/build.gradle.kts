@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     // AGP 9 has built-in Kotlin support, so no separate kotlin-android plugin.
     alias(libs.plugins.android.application)
@@ -19,11 +21,35 @@ android {
         versionName = "0.1.0"
     }
 
+    /**
+     * Release signing, when the key material is present.
+     *
+     * Read from an untracked `keystore.properties` so a signing key never lands in git.
+     * Absent, the release build stays unsigned — which still verifies that R8 and resource
+     * shrinking succeed, and is the right default for a repository.
+     */
+    val keystoreProperties = Properties().apply {
+        val file = rootProject.file("keystore.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+
+    signingConfigs {
+        if (keystoreProperties.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

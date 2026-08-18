@@ -11,3 +11,7 @@ captures/
 *.aab
 *.keystore
 !debug.keystore
+
+# Release signing material, generated locally. Never committed.
+keystore.properties
+*.jks
