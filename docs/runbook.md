@@ -30,8 +30,9 @@ Total time: about 45 minutes. Nothing costs money.
 
 You should now see a screen titled **Shelfit Sentinel** with a Start Listening button.
 
-> **If it says "App not installed"** and you have had a version of this app before, uninstall
-> the old one first: long-press its icon → **Uninstall**. Then install again.
+> **If I have sent you a newer version**, install it straight over the top — nothing is lost.
+> Only if Android refuses with **App not installed** do you need to uninstall the old one first
+> (long-press the icon → **Uninstall**), which clears your settings.
 
 ---
 
@@ -196,9 +197,18 @@ A screen appears called **Authorize API Services**.
 
 The **Connection** card should now say **Connected**, and below it you should see your devices.
 
-> **"Not connected"** means the Access ID or Secret is wrong — copy them again, carefully.
-> **Connected but no devices** means either the app account link in 5e did not take, or the data
-> centre does not match.
+The app now tells you which of three different things went wrong, because they have different
+fixes:
+
+| What it says | What it means | What to do |
+| --- | --- | --- |
+| **Unavailable**, with `Tuya 1004: sign invalid` or similar | The Access ID or Secret is wrong, or the data centre does not match | Re-copy both keys from 5f; check the data centre against 5a |
+| **Unavailable** — *"Your keys work, but no devices are shared with this cloud project"* | Your keys are correct. The app account is not linked | Redo 5e, and make sure you used the **Devices** tab, not **Users** |
+| **Unavailable**, with `Tuya 28841105: No permissions` or *"not subscribed"* | A service is not enabled on the project, or the trial has lapsed | In the Tuya console, check **Authorize API Services** (5d) and that IoT Core is active |
+| **Connected**, devices listed | Working | Continue to Part 7 |
+
+Whatever it says, the grey text underneath is **Tuya's own error code and message, word for
+word**. If you are stuck, send me that line — it names the cause exactly.
 
 ---
 
