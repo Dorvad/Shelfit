@@ -48,6 +48,8 @@ data class LanDeviceRowUi(
     val deviceId: String,
     val ip: String,
     val protocolLabel: String,
+    /** From the cloud list when connected; a bare id otherwise. */
+    val name: String?,
     /** False while local control is unimplemented — see docs/tuya-lan.md. */
     val controlSupported: Boolean,
 )
@@ -57,6 +59,14 @@ data class LocalKeyRowUi(
     val name: String,
     val deviceId: String,
     val localKey: String,
+    /**
+     * How local control would have to reach it: on its own IP, or through a hub.
+     *
+     * Worth showing, because it decides whether local control is even possible for that
+     * device — and it is invisible otherwise.
+     */
+    val reachability: String,
+    val directlyReachable: Boolean,
 )
 
 /** What the screen needs to explain the connection and what to do about it. */
@@ -260,8 +270,28 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
         protocolLabel = announcement.protocolVersion
             ?.let { "Protocol $it" }
             ?: "Protocol not reported",
+        // The broadcast carries no name, so it comes from the cloud list when there is one.
+        // Matching an id against a name by hand across two screens is the sort of clerical
+        // work software should be doing.
+        name = container.smartHomeDirectory.devices.value.devices
+            .firstOrNull { it.id.value == announcement.deviceId }
+            ?.name,
         controlSupported = announcement.controlSupported,
     )
+
+    /**
+     * How local control would have to reach this device, in the user's terms.
+     *
+     * Names the gateway where we know it, because "through Multi-mode Gateway" is actionable
+     * and "through a hub" is not.
+     */
+    private fun TuyaLocalCredential.describeReachability(
+        byId: Map<String, TuyaLocalCredential>,
+    ): String = when {
+        !isSubDevice -> "On Wi-Fi — reachable directly"
+        gatewayId == null -> "Through a hub"
+        else -> "Through ${byId[gatewayId]?.name ?: "a hub"}"
+    }
 
     /**
      * Fetches the per-device local keys, for setting up LAN control later.
@@ -274,9 +304,20 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             when (val result = container.tuyaCloudClient.localCredentials()) {
                 is SmartHomeResult.Success -> {
+                    val byId = result.value.associateBy { it.deviceId }
                     localKeys.value = result.value
                         .filter(TuyaLocalCredential::usable)
-                        .map { LocalKeyRowUi(it.name, it.deviceId, it.localKey) }
+                        // Directly reachable first: those are the ones local control can use.
+                        .sortedByDescending { it.directlyReachable }
+                        .map { credential ->
+                            LocalKeyRowUi(
+                                name = credential.name,
+                                deviceId = credential.deviceId,
+                                localKey = credential.localKey,
+                                reachability = credential.describeReachability(byId),
+                                directlyReachable = credential.directlyReachable,
+                            )
+                        }
                     if (localKeys.value.isNullOrEmpty()) {
                         localKeysProblem.value =
                             "Connected, but no local keys came back. This usually means the " +

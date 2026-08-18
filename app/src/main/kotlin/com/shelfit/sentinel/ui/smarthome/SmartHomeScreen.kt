@@ -492,12 +492,23 @@ private fun LanScanCard(uiState: SmartHomeUiState, onScanLan: () -> Unit) {
 @Composable
 private fun LanDeviceRow(device: LanDeviceRowUi) {
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Text(device.ip, style = MaterialTheme.typography.bodyLarge)
         Text(
-            text = "${device.protocolLabel} · ${device.deviceId}",
+            text = device.name ?: device.ip,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Text(
+            text = "${device.ip} · ${device.protocolLabel}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        SelectionContainer {
+            Text(
+                text = device.deviceId,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -539,6 +550,15 @@ private fun LocalKeysCard(
             keys.forEach { key ->
                 Column(modifier = Modifier.padding(vertical = 6.dp)) {
                     Text(key.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = key.reachability,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (key.directlyReachable) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                     Text(
                         text = "Local key",
                         style = MaterialTheme.typography.labelSmall,

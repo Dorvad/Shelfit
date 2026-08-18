@@ -297,16 +297,8 @@ class TuyaCloudClient internal constructor(
         return when (val listed = fetchDevices()) {
             is SmartHomeResult.Failure -> SmartHomeResult.Failure(listed.failure)
 
-            is SmartHomeResult.Success -> SmartHomeResult.Success(
-                listed.value.map { json ->
-                    TuyaLocalCredential(
-                        deviceId = json.optString("id"),
-                        name = json.optString("name").ifEmpty { "Unnamed device" },
-                        localKey = json.optString("local_key"),
-                        ip = json.optString("ip").ifEmpty { null },
-                    )
-                },
-            )
+            is SmartHomeResult.Success ->
+                SmartHomeResult.Success(TuyaLocalCredential.fromDeviceList(listed.value))
         }
     }
 
