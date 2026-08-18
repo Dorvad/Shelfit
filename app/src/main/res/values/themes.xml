@@ -2,12 +2,15 @@
 <resources>
     <!--
       Compose draws the entire UI, so the platform theme only needs to remove the
-      action bar and set a launch background that matches. Kept on the framework
-      Material theme to avoid pulling in the Material Components view library.
+      action bar and set a launch background that matches. The app commits to one
+      dark visual world (see ui/theme/Theme.kt), so the platform side commits with
+      it: a light launch flash before the first frame would break the shelf-object
+      illusion every time the app opens.
     -->
-    <style name="Theme.Sentinel" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Sentinel" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@color/launch_background</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

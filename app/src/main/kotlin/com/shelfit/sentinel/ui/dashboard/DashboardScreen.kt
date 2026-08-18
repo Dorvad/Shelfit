@@ -1,33 +1,32 @@
 package com.shelfit.sentinel.ui.dashboard
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -38,9 +37,20 @@ import com.shelfit.sentinel.core.sensor.SensorKind
 import com.shelfit.sentinel.core.sensor.SensorStatus
 import com.shelfit.sentinel.core.trigger.TriggerId
 import com.shelfit.sentinel.core.trigger.TriggerState
+import com.shelfit.sentinel.ui.components.BreathingDot
+import com.shelfit.sentinel.ui.components.GhostButton
+import com.shelfit.sentinel.ui.components.GlassCard
+import com.shelfit.sentinel.ui.components.GradientButton
+import com.shelfit.sentinel.ui.components.HeroCard
+import com.shelfit.sentinel.ui.components.LabelledRow
+import com.shelfit.sentinel.ui.components.SectionCard
+import com.shelfit.sentinel.ui.components.SectionLabel
+import com.shelfit.sentinel.ui.components.ShelfDivider
+import com.shelfit.sentinel.ui.components.shelfBackground
 import com.shelfit.sentinel.ui.permission.MicrophonePermissionState
 import com.shelfit.sentinel.ui.permission.rememberMicrophonePermissionState
 import com.shelfit.sentinel.ui.theme.SentinelTheme
+import com.shelfit.sentinel.ui.theme.Shelf
 
 @Composable
 fun DashboardRoute(
@@ -49,6 +59,7 @@ fun DashboardRoute(
     onOpenClapLab: () -> Unit,
     onOpenHealth: () -> Unit,
     onOpenRules: () -> Unit,
+    onOpenShelf: () -> Unit,
     viewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.factory(container)),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -69,10 +80,19 @@ fun DashboardRoute(
         onOpenClapLab = onOpenClapLab,
         onOpenHealth = onOpenHealth,
         onOpenRules = onOpenRules,
+        onOpenShelf = onOpenShelf,
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The home screen, laid out as the hi-fi artboard draws it: the sensor-mode state as the
+ * screen's one hero object, then status, then the trigger, then a quiet list of doors to
+ * everywhere else.
+ *
+ * The hero also holds the way onto the shelf face when listening is running — the moment
+ * the phone is doing its job is exactly the moment you want to set it down and let it
+ * become a decor object.
+ */
 @Composable
 fun DashboardScreen(
     uiState: DashboardUiState,
@@ -83,60 +103,152 @@ fun DashboardScreen(
     onOpenClapLab: () -> Unit,
     onOpenHealth: () -> Unit,
     onOpenRules: () -> Unit,
+    onOpenShelf: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Shelfit Sentinel") },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_tune),
-                            contentDescription = "Settings",
-                        )
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+    val palette = Shelf.palette
+    Box(
+        Modifier
+            .fillMaxSize()
+            .shelfBackground(palette.gradientTop, palette.gradientMid, palette.gradientBottom),
+    ) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            // The artboard's header: app name left, a ringed settings glyph right.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Shelfit Sentinel",
+                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 21.sp),
+                    color = palette.text,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .border(1.dp, palette.cardLine, CircleShape)
+                        .clickable(onClick = onOpenSettings),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_tune),
+                        contentDescription = "Settings",
+                        tint = Color(0xFFBDD2F6),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(13.dp),
+            ) {
+                if (!permission.granted) {
+                    MicrophonePermissionCard(permission)
+                }
+
+                SensorModeHero(
+                    uiState = uiState,
+                    enabled = permission.granted,
+                    onToggleSensorMode = onToggleSensorMode,
+                    onResume = onResume,
+                    onOpenShelf = onOpenShelf,
+                )
+
+                SensorStatusCard(uiState.sensors)
+
+                uiState.triggers.forEach { trigger ->
+                    TriggerCard(trigger)
+                }
+
+                NavigationCard(
+                    onOpenRules = onOpenRules,
+                    onOpenHealth = onOpenHealth,
+                    onOpenClapLab = onOpenClapLab,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The screen's bright object: where Sensor Mode stands and the one control that changes it.
+ *
+ * State first, control second, and while listening a second door: the shelf face. That
+ * button is the product's happy path — turn it on, put it on the shelf — so it lives in
+ * the hero, not buried in a menu.
+ */
+@Composable
+private fun SensorModeHero(
+    uiState: DashboardUiState,
+    enabled: Boolean,
+    onToggleSensorMode: () -> Unit,
+    onResume: () -> Unit,
+    onOpenShelf: () -> Unit,
+) {
+    val palette = Shelf.palette
+    HeroCard {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (!permission.granted) {
-                MicrophonePermissionCard(permission)
+            if (uiState.isRunning) {
+                BreathingDot(size = 9.dp)
+            } else {
+                Box(
+                    Modifier
+                        .padding(9.dp)
+                        .size(9.dp)
+                        .background(Color(0x668CA3C9), CircleShape),
+                )
             }
-
-            SensorStatusCard(uiState.sensors)
-
-            uiState.triggers.forEach { trigger ->
-                TriggerCard(trigger)
-            }
-
-            SensorModeControl(
-                uiState = uiState,
-                enabled = permission.granted,
-                onToggleSensorMode = onToggleSensorMode,
-                onResume = onResume,
+            Text(
+                text = when {
+                    uiState.health.resumeRequired -> "Listening is paused"
+                    uiState.isRunning -> "Sensor Mode is on"
+                    else -> "Sensor Mode is off"
+                },
+                style = MaterialTheme.typography.titleMedium,
+                color = palette.text,
+            )
+        }
+        Text(
+            text = when {
+                uiState.health.resumeRequired ->
+                    "Android needs one tap after a reboot or update."
+                uiState.isRunning ->
+                    "Listening with the screen off. Keep the phone plugged in."
+                else ->
+                    "Sensor Mode runs a foreground service so listening continues " +
+                        "with the screen off."
+            },
+            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+            color = palette.textDim,
+        )
+        when {
+            uiState.health.resumeRequired -> GradientButton(
+                text = "Resume listening",
+                onClick = onResume,
+                enabled = enabled,
             )
 
-            TextButton(
-                onClick = onOpenRules,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Automations") }
+            uiState.sensorModeEnabled -> {
+                GhostButton(text = "Turn off Sensor Mode", onClick = onToggleSensorMode)
+                if (uiState.isRunning) {
+                    GradientButton(text = "Shelf display", onClick = onOpenShelf)
+                }
+            }
 
-            TextButton(
-                onClick = onOpenHealth,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Sensor health and setup") }
-
-            TextButton(
-                onClick = onOpenClapLab,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Open clap detector test") }
+            else -> GradientButton(
+                text = "Turn on Sensor Mode",
+                onClick = onToggleSensorMode,
+                enabled = enabled,
+            )
         }
     }
 }
@@ -147,32 +259,22 @@ fun DashboardScreen(
  */
 @Composable
 private fun MicrophonePermissionCard(permission: MicrophonePermissionState) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Microphone access is required to hear claps",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            Text(
-                text = "Audio is analysed on this device and never recorded or sent " +
-                    "anywhere.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            if (permission.deniedAfterRequest) {
-                Button(onClick = permission.openAppSettings) { Text("Open app settings") }
-            } else {
-                Button(onClick = permission.request) { Text("Grant microphone access") }
-            }
+    val palette = Shelf.palette
+    GlassCard {
+        Text(
+            text = "Microphone access is required to hear claps",
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.warn,
+        )
+        Text(
+            text = "Audio is analysed on this device and never recorded or sent anywhere.",
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.textDim,
+        )
+        if (permission.deniedAfterRequest) {
+            GradientButton(text = "Open app settings", onClick = permission.openAppSettings)
+        } else {
+            GradientButton(text = "Grant microphone access", onClick = permission.request)
         }
     }
 }
@@ -181,33 +283,61 @@ private fun MicrophonePermissionCard(permission: MicrophonePermissionState) {
 private fun SensorStatusCard(sensors: List<SensorStatus>) {
     SectionCard(title = "Sensor status") {
         if (sensors.isEmpty()) {
-            Text("No sensors required", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "No sensors required",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Shelf.palette.textDim,
+            )
             return@SectionCard
         }
         sensors.forEach { status ->
-            LabelledRow(
+            StatusRow(
                 label = status.kind.label(),
                 value = status.availability.label(),
-                emphasise = status.availability != SensorAvailability.AVAILABLE,
+                good = status.availability == SensorAvailability.AVAILABLE,
             )
         }
     }
 }
 
+/** Key–value row where a good value glows cyan, the design's status colour. */
+@Composable
+private fun StatusRow(label: String, value: String, good: Boolean) {
+    val palette = Shelf.palette
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = palette.text)
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (good) palette.cyan else palette.warn,
+        )
+    }
+}
+
 @Composable
 private fun TriggerCard(trigger: TriggerRowUi) {
-    SectionCard(title = "Trigger") {
-        Text(trigger.name, style = MaterialTheme.typography.titleMedium)
+    val palette = Shelf.palette
+    GlassCard {
+        SectionLabel("Trigger")
+        Text(
+            trigger.name,
+            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+            color = palette.text,
+        )
         Text(
             trigger.description,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.textDim,
         )
-        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        LabelledRow(
+        ShelfDivider(Modifier.padding(vertical = 4.dp))
+        StatusRow(
             label = "Detector",
             value = trigger.state.label(),
-            emphasise = trigger.state !is TriggerState.Active,
+            good = trigger.state is TriggerState.Active,
         )
         if (trigger.actionNames.isEmpty()) {
             LabelledRow(
@@ -226,88 +356,46 @@ private fun TriggerCard(trigger: TriggerRowUi) {
     }
 }
 
+/** The artboard's door list: three rows, chevrons, hairlines between. */
 @Composable
-private fun SensorModeControl(
-    uiState: DashboardUiState,
-    enabled: Boolean,
-    onToggleSensorMode: () -> Unit,
-    onResume: () -> Unit,
+private fun NavigationCard(
+    onOpenRules: () -> Unit,
+    onOpenHealth: () -> Unit,
+    onOpenClapLab: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (uiState.health.resumeRequired) {
-            Button(
-                onClick = onResume,
-                enabled = enabled,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Resume listening") }
-        } else if (uiState.sensorModeEnabled) {
-            OutlinedButton(onClick = onToggleSensorMode, modifier = Modifier.fillMaxWidth()) {
-                Text("Turn off Sensor Mode")
-            }
-        } else {
-            Button(
-                onClick = onToggleSensorMode,
-                enabled = enabled,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Turn on Sensor Mode") }
-        }
-        Text(
-            text = if (uiState.isRunning) {
-                "Listening with the screen off. Keep the phone plugged in."
-            } else {
-                "Sensor Mode runs a foreground service so listening continues with the " +
-                    "screen off."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
+    GlassCard(contentPadding = 0.dp) {
+        NavRow("Automations", onOpenRules, showDivider = true)
+        NavRow("Sensor health and setup", onOpenHealth, showDivider = true)
+        NavRow("Clap detector test", onOpenClapLab, showDivider = false)
     }
 }
 
 @Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+private fun NavRow(title: String, onClick: () -> Unit, showDivider: Boolean) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = title.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = Shelf.palette.text,
+                modifier = Modifier.weight(1f),
             )
-            content()
+            Icon(
+                painter = painterResource(R.drawable.ic_chevron_right),
+                contentDescription = null,
+                tint = Color(0xFF5E769F),
+                modifier = Modifier.size(18.dp),
+            )
         }
-    }
-}
-
-@Composable
-private fun LabelledRow(label: String, value: String, emphasise: Boolean = false) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (emphasise) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
+        if (showDivider) {
+            ShelfDivider(Modifier.padding(horizontal = 16.dp))
+        }
     }
 }
 
@@ -344,23 +432,23 @@ private fun DashboardScreenPreview() {
     SentinelTheme {
         DashboardScreen(
             uiState = DashboardUiState(
-                isRunning = false,
+                isRunning = true,
                 sensors = listOf(
-                    SensorStatus(SensorKind.MICROPHONE, SensorAvailability.PERMISSION_REQUIRED),
+                    SensorStatus(SensorKind.MICROPHONE, SensorAvailability.AVAILABLE),
                 ),
                 triggers = listOf(
                     TriggerRowUi(
                         id = TriggerId.DoubleClap,
                         name = "Double clap",
                         description = "Clap twice, quickly",
-                        state = TriggerState.Idle,
-                        actionNames = listOf("Vibrate the phone"),
+                        state = TriggerState.Active,
+                        actionNames = listOf("Toggle Living room lamp"),
                         rulesWithoutAction = 0,
                     ),
                 ),
             ),
             permission = MicrophonePermissionState(
-                granted = false,
+                granted = true,
                 deniedAfterRequest = false,
                 request = {},
                 openAppSettings = {},
@@ -371,6 +459,7 @@ private fun DashboardScreenPreview() {
             onOpenClapLab = {},
             onOpenHealth = {},
             onOpenRules = {},
+            onOpenShelf = {},
         )
     }
 }

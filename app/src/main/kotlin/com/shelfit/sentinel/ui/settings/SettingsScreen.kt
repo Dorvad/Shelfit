@@ -5,41 +5,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shelfit.sentinel.AppContainer
-import com.shelfit.sentinel.R
 import com.shelfit.sentinel.data.SentinelSettings
 import com.shelfit.sentinel.trigger.audio.CalibrationQuality
 import com.shelfit.sentinel.trigger.audio.SensitivityLevel
+import com.shelfit.sentinel.ui.components.GhostButton
+import com.shelfit.sentinel.ui.components.GradientButton
 import com.shelfit.sentinel.ui.components.LabelledRow
+import com.shelfit.sentinel.ui.components.LinkButton
+import com.shelfit.sentinel.ui.components.SectionLabel
+import com.shelfit.sentinel.ui.components.SentinelScreen
+import com.shelfit.sentinel.ui.components.ShelfDivider
+import com.shelfit.sentinel.ui.components.ShelfSegmented
+import com.shelfit.sentinel.ui.components.ShelfSwitch
 import com.shelfit.sentinel.ui.components.SectionCard
 import com.shelfit.sentinel.ui.components.formatDecibels
 import com.shelfit.sentinel.ui.theme.SentinelTheme
+import com.shelfit.sentinel.ui.theme.Shelf
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -69,7 +61,6 @@ fun SettingsRoute(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settings: SentinelSettings,
@@ -83,28 +74,7 @@ fun SettingsScreen(
     onOpenSmartHome: () -> Unit,
     onNavigateBack: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
-                        )
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    SentinelScreen(title = "Settings", onNavigateBack = onNavigateBack) {
             SectionHeader("Double clap")
 
             SwitchRow(
@@ -123,7 +93,7 @@ fun SettingsScreen(
                 onCheckedChange = onHapticFeedbackChange,
             )
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            ShelfDivider(Modifier.padding(vertical = 4.dp))
 
             SectionHeader("Calibration")
 
@@ -133,7 +103,7 @@ fun SettingsScreen(
                 onClearCalibration = onClearCalibration,
             )
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            ShelfDivider(Modifier.padding(vertical = 4.dp))
 
             SectionHeader("Smart home")
 
@@ -141,13 +111,11 @@ fun SettingsScreen(
                 text = "Link a smart home so an automation can switch your lights and " +
                     "plugs. Nothing is linked until you connect it.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Shelf.palette.textDim,
             )
-            Button(onClick = onOpenSmartHome, modifier = Modifier.fillMaxWidth()) {
-                Text("Smart home setup")
-            }
+            GradientButton(text = "Smart home setup", onClick = onOpenSmartHome)
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            ShelfDivider(Modifier.padding(vertical = 4.dp))
 
             SectionHeader("Device")
 
@@ -159,20 +127,17 @@ fun SettingsScreen(
                 onCheckedChange = onKeepScreenOnChange,
             )
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            ShelfDivider(Modifier.padding(vertical = 4.dp))
 
-            TextButton(onClick = onOpenClapLab, modifier = Modifier.fillMaxWidth()) {
-                Text("Advanced: clap detector test")
-            }
+            LinkButton(text = "Advanced: clap detector test", onClick = onOpenClapLab)
 
             Text(
                 text = "Sensor data is processed on this device. Audio is never " +
                     "recorded to storage.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Shelf.palette.textFaint,
             )
         }
-    }
 }
 
 /**
@@ -181,7 +146,6 @@ fun SettingsScreen(
  * "Normal" means whatever calibration measured, or the generic defaults if the user
  * has not calibrated — so the label stays meaningful either way.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SensitivityChooser(
     selected: SensitivityLevel,
@@ -191,31 +155,23 @@ private fun SensitivityChooser(
         modifier = Modifier.padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("Sensitivity", style = MaterialTheme.typography.bodyLarge)
+        Text("Sensitivity", style = MaterialTheme.typography.bodyLarge, color = Shelf.palette.text)
 
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            SensitivityLevel.entries.forEachIndexed { index, level ->
-                SegmentedButton(
-                    selected = level == selected,
-                    onClick = { onSelect(level) },
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = SensitivityLevel.entries.size,
-                    ),
-                    label = { Text(level.label()) },
-                )
-            }
-        }
+        ShelfSegmented(
+            options = SensitivityLevel.entries.map { it.label() },
+            selectedIndex = SensitivityLevel.entries.indexOf(selected),
+            onSelect = { onSelect(SensitivityLevel.entries[it]) },
+        )
 
         Text(
             text = selected.explanation(),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textFaint,
         )
         Text(
             text = "Takes effect the next time detection starts.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textFaint,
         )
     }
 }
@@ -236,9 +192,7 @@ private fun CalibrationSummary(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        Button(onClick = onOpenCalibration, modifier = Modifier.fillMaxWidth()) {
-            Text("Calibrate now")
-        }
+        GradientButton(text = "Calibrate now", onClick = onOpenCalibration)
         return
     }
 
@@ -262,12 +216,8 @@ private fun CalibrationSummary(
             emphasise = calibration.quality != CalibrationQuality.GOOD,
         )
     }
-    Button(onClick = onOpenCalibration, modifier = Modifier.fillMaxWidth()) {
-        Text("Calibrate again")
-    }
-    OutlinedButton(onClick = onClearCalibration, modifier = Modifier.fillMaxWidth()) {
-        Text("Use generic settings")
-    }
+    GhostButton(text = "Calibrate again", onClick = onOpenCalibration)
+    GhostButton(text = "Use generic settings", onClick = onClearCalibration)
 }
 
 private fun SensitivityLevel.label(): String = when (this) {
@@ -295,12 +245,7 @@ private val TIMESTAMP_FORMAT: DateTimeFormatter =
 
 @Composable
 private fun SectionHeader(title: String) {
-    Text(
-        text = title.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp),
-    )
+    SectionLabel(title, Modifier.padding(top = 8.dp))
 }
 
 @Composable
@@ -315,14 +260,14 @@ private fun SwitchRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = Shelf.palette.text)
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Shelf.palette.textDim,
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        ShelfSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

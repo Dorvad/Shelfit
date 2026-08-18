@@ -297,7 +297,39 @@ the right first implementation because its failures are individually attributabl
   `platform/smarthome/`. Nothing in `core/`, `trigger/`, `ui/` or `service/` may import one.
   Enforced by test.
 
-## Privacy principles
+## The design system
+
+The app has one visual world: a deep blue night, always. **Dark is committed, not
+preferred** — no light theme, no dynamic colour, no system-theme following. The product is
+a phone posing as a decor object on a shelf, and a decor object does not turn white at
+sunrise or recolour itself to match the wallpaper. A light variant would be a different
+design, not a theme flip; do not add one casually.
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| `ShelfPalette` | `ui/theme/Palette.kt` | Every colour in the app, as one immutable value. Sapphire ships; Ocean and Midnight exist as alternates. **Do not hard-code a colour in a screen** — new colours go in the palette |
+| `SentinelTheme` | `ui/theme/Theme.kt` | Provides `LocalShelfPalette`, plus a Material `darkColorScheme` mapped *from* the palette so stray M3 widgets (text fields) land in the same world |
+| `Shelf.palette` | `ui/theme/Theme.kt` | How screens read tokens |
+| Typography | `ui/theme/Type.kt` | Hanken Grotesk, a single variable TTF in `res/font/` (weights via `FontVariation`). OFL licence at `docs/licenses/HankenGrotesk-OFL.txt` |
+| Components | `ui/components/Sentinel.kt` | `SentinelScreen` (gradient scaffold), `GlassCard`/`HeroCard`, `GradientButton`/`GhostButton`/`LinkButton`, `ShelfSwitch`/`ShelfRadio`/`ShelfCheckbox`/`ShelfSegmented`, `StatusPill`, `BreathingDot`, `RippleRing` |
+
+Screens compose these; they do not restyle M3 widgets locally. The custom controls exist
+because M3 components cannot take a gradient fill — that is the only reason, so a component
+M3 *can* render faithfully (e.g. `OutlinedTextField`) stays stock and inherits the mapped
+colour scheme.
+
+**The shelf display** (`ui/shelf/ShelfScreen.kt`) is the decor-object mode: a dimmed
+always-on face with a thin clock, a breathing dot while listening, and a ripple moment when
+a double clap fires. Behaviours that look odd but are load-bearing:
+
+- Window effects (keep-screen-on, brightness override to 4%, hidden system bars) are applied
+  in a `DisposableEffect(Unit)` with `rememberUpdatedState` — re-keying would re-capture the
+  dimmed brightness as the value to restore.
+- The clock drifts a few dp on a minute schedule, seeded from the minute — OLED burn-in
+  protection, not decoration.
+- Detection outcomes are filtered by `elapsedRealtime` against entry time, because the
+  outcome flow replays and a stale event must not ripple on entry.
+- Tap exits. There is deliberately no other chrome on the screen.
 
 These are product commitments, not preferences:
 
@@ -430,9 +462,10 @@ and no implementations.
 
 Screens: dashboard, settings, `ui/rules` — the rule editor, including the device picker —
 `ui/smarthome` — connect, choose a home, see what can be switched — `ui/health` — setup and
-health checks — `ui/calibration` — the guided flow — and `ui/claplab`, a developer screen
+health checks — `ui/calibration` — the guided flow — `ui/claplab`, a developer screen
 showing live level, the tracked background, the adaptive gate, the thresholds in force,
-rejection reasons and the event log.
+rejection reasons and the event log — and `ui/shelf`, the ambient shelf display described
+under **The design system**.
 
 Sensitivity is exposed to users as **Low / Normal / High**; numeric thresholds are
 read-only on the developer screen. Do not put raw scalars in the settings screen —

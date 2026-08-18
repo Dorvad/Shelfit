@@ -5,46 +5,38 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shelfit.sentinel.AppContainer
-import com.shelfit.sentinel.R
 import com.shelfit.sentinel.core.sensormode.BatteryOptimisationStatus
 import com.shelfit.sentinel.core.sensormode.ListeningMode
 import com.shelfit.sentinel.core.sensormode.PermissionStatus
 import com.shelfit.sentinel.core.sensormode.SensorHealth
 import com.shelfit.sentinel.core.sensormode.SensorModeError
+import com.shelfit.sentinel.ui.components.GhostButton
+import com.shelfit.sentinel.ui.components.GlassCard
+import com.shelfit.sentinel.ui.components.GradientButton
+import com.shelfit.sentinel.ui.components.HeroCard
 import com.shelfit.sentinel.ui.components.LabelledRow
+import com.shelfit.sentinel.ui.components.LinkButton
+import com.shelfit.sentinel.ui.components.SentinelScreen
 import com.shelfit.sentinel.ui.components.SectionCard
+import com.shelfit.sentinel.ui.components.ShelfDivider
 import com.shelfit.sentinel.ui.permission.MicrophonePermissionState
 import com.shelfit.sentinel.ui.permission.NotificationPermissionState
 import com.shelfit.sentinel.ui.permission.rememberMicrophonePermissionState
 import com.shelfit.sentinel.ui.permission.rememberNotificationPermissionState
 import com.shelfit.sentinel.ui.theme.SentinelTheme
+import com.shelfit.sentinel.ui.theme.Shelf
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -87,7 +79,6 @@ fun SensorHealthRoute(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SensorHealthScreen(
     health: SensorHealth,
@@ -102,28 +93,7 @@ fun SensorHealthScreen(
     onOpenAppSettings: () -> Unit,
     onNavigateBack: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Sensor health") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
-                        )
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+    SentinelScreen(title = "Sensor health", onNavigateBack = onNavigateBack) {
             HeadlineCard(health)
 
             if (health.resumeRequired) {
@@ -222,7 +192,7 @@ fun SensorHealthScreen(
                 BatteryOptimisationCard(onOpenBatterySettings)
             }
 
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            ShelfDivider(Modifier.padding(vertical = 4.dp))
 
             SensorModeControls(
                 health = health,
@@ -233,50 +203,41 @@ fun SensorHealthScreen(
                 onResume = onResume,
             )
         }
-    }
 }
 
 @Composable
 private fun HeadlineCard(health: SensorHealth) {
     val ready = health.readyForUnattendedUse
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                !health.desiredMode.isEnabled -> MaterialTheme.colorScheme.surfaceContainer
-                ready -> MaterialTheme.colorScheme.primaryContainer
-                else -> MaterialTheme.colorScheme.errorContainer
+    val palette = Shelf.palette
+    HeroCard {
+        Text(
+            text = when {
+                !health.desiredMode.isEnabled -> "Sensor Mode is off"
+                ready && health.listening -> "Listening, unattended"
+                ready -> "Ready"
+                else -> "Something needs your attention"
             },
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = when {
-                    !health.desiredMode.isEnabled -> "Sensor Mode is off"
-                    ready && health.listening -> "Listening, unattended"
-                    ready -> "Ready"
-                    else -> "Something needs your attention"
-                },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = when {
-                    !health.desiredMode.isEnabled ->
-                        "Turn Sensor Mode on to listen for claps with the screen off."
+            style = MaterialTheme.typography.headlineSmall,
+            color = when {
+                !health.desiredMode.isEnabled -> palette.textDim
+                ready -> palette.cyan
+                else -> palette.warn
+            },
+        )
+        Text(
+            text = when {
+                !health.desiredMode.isEnabled ->
+                    "Turn Sensor Mode on to listen for claps with the screen off."
 
-                    ready && health.listening ->
-                        "The screen can be off. Keep the phone plugged in."
+                ready && health.listening ->
+                    "The screen can be off. Keep the phone plugged in."
 
-                    ready -> "Nothing is blocking unattended use."
-                    else -> "${health.attention.size} item(s) below need looking at."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
+                ready -> "Nothing is blocking unattended use."
+                else -> "${health.attention.size} item(s) below need looking at."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textDim,
+        )
     }
 }
 
@@ -287,28 +248,18 @@ private fun ActionCard(
     actionLabel: String,
     onAction: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            Text(
-                text = body,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            Button(onClick = onAction) { Text(actionLabel) }
-        }
+    GlassCard {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = Shelf.palette.warn,
+        )
+        Text(
+            text = body,
+            style = MaterialTheme.typography.bodySmall,
+            color = Shelf.palette.textDim,
+        )
+        GradientButton(text = actionLabel, onClick = onAction)
     }
 }
 
@@ -321,35 +272,27 @@ private fun ActionCard(
  */
 @Composable
 private fun BatteryOptimisationCard(onOpenSettings: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Battery optimisation is on",
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                text = "Stock Android will not stop a listening foreground service for this " +
-                    "reason, so Sensor Mode usually works fine as-is. Some manufacturers are " +
-                    "more aggressive and stop background apps anyway. If listening keeps " +
-                    "stopping on its own, exempting the app is the fix.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = "Android opens its own list — find Shelfit Sentinel and choose " +
-                    "\"Don't optimise\".",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(onClick = onOpenSettings) { Text("Open battery settings") }
-        }
+    GlassCard {
+        Text(
+            text = "Battery optimisation is on",
+            style = MaterialTheme.typography.titleMedium,
+            color = Shelf.palette.text,
+        )
+        Text(
+            text = "Stock Android will not stop a listening foreground service for this " +
+                "reason, so Sensor Mode usually works fine as-is. Some manufacturers are " +
+                "more aggressive and stop background apps anyway. If listening keeps " +
+                "stopping on its own, exempting the app is the fix.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Shelf.palette.textDim,
+        )
+        Text(
+            text = "Android opens its own list — find Shelfit Sentinel and choose " +
+                "\"Don't optimise\".",
+            style = MaterialTheme.typography.bodySmall,
+            color = Shelf.palette.textFaint,
+        )
+        GhostButton(text = "Open battery settings", onClick = onOpenSettings)
     }
 }
 
@@ -364,32 +307,26 @@ private fun SensorModeControls(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (health.desiredMode) {
-            ListeningMode.OFF -> Button(
+            ListeningMode.OFF -> GradientButton(
+                text = "Turn on Sensor Mode",
                 onClick = onEnable,
                 enabled = enabled,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Turn on Sensor Mode") }
+            )
 
             ListeningMode.LISTENING -> {
                 if (health.serviceRunning) {
-                    OutlinedButton(onClick = onPause, modifier = Modifier.fillMaxWidth()) {
-                        Text("Pause listening")
-                    }
+                    GhostButton(text = "Pause listening", onClick = onPause)
                 }
-                TextButton(onClick = onDisable, modifier = Modifier.fillMaxWidth()) {
-                    Text("Turn off Sensor Mode")
-                }
+                LinkButton(text = "Turn off Sensor Mode", onClick = onDisable)
             }
 
             ListeningMode.PAUSED -> {
-                Button(
+                GradientButton(
+                    text = "Resume listening",
                     onClick = onResume,
                     enabled = enabled,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Resume listening") }
-                TextButton(onClick = onDisable, modifier = Modifier.fillMaxWidth()) {
-                    Text("Turn off Sensor Mode")
-                }
+                )
+                LinkButton(text = "Turn off Sensor Mode", onClick = onDisable)
             }
         }
     }

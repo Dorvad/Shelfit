@@ -1,48 +1,74 @@
 package com.shelfit.sentinel.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 
-// Fallback scheme for Android 10/11, which have no Material You colour extraction.
-private val SentinelLightColors = lightColorScheme(
-    primary = Color(0xFF00639B),
-    secondary = Color(0xFF50606E),
-    tertiary = Color(0xFF65587B),
-)
-
-private val SentinelDarkColors = darkColorScheme(
-    primary = Color(0xFF97CBFF),
-    secondary = Color(0xFFB7C9D9),
-    tertiary = Color(0xFFCFC0E8),
-)
-
+/**
+ * The app commits to one visual world: a deep blue night, always.
+ *
+ * Deliberately not system-theme-following and not Material You. The product is a phone
+ * that sits on a shelf pretending to be a decor object, and a decor object does not turn
+ * white at sunrise or recolour itself to match the wallpaper. The hi-fi design is built
+ * on that premise; a light variant of it would be a different design, not a theme flip.
+ *
+ * Two layers are provided:
+ *
+ * - [LocalShelfPalette] — the design's own tokens, used by everything in `ui/components`
+ *   and the screens. This is the source of truth.
+ * - A Material [darkColorScheme] mapped *from* the palette, so any stock Material widget
+ *   still on a screen (text fields, progress indicators) lands inside the same world
+ *   instead of Material baseline purple.
+ */
 @Composable
 fun SentinelTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    palette: ShelfPalette = Sapphire,
     content: @Composable () -> Unit,
 ) {
-    val context = LocalContext.current
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-
-        darkTheme -> SentinelDarkColors
-        else -> SentinelLightColors
-    }
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography(),
-        content = content,
+    val colorScheme = darkColorScheme(
+        primary = palette.accentEnd,
+        onPrimary = palette.onAccent,
+        primaryContainer = palette.accentStart,
+        onPrimaryContainer = palette.text,
+        secondary = palette.accent,
+        onSecondary = palette.onAccent,
+        tertiary = palette.cyan,
+        onTertiary = palette.onAccent,
+        background = palette.gradientBottom,
+        onBackground = palette.text,
+        // Screens paint their own gradient; Material surfaces sit transparent-ish above it.
+        surface = palette.gradientBottom,
+        onSurface = palette.text,
+        surfaceVariant = palette.cardFill,
+        onSurfaceVariant = palette.textDim,
+        surfaceContainer = palette.cardFill,
+        surfaceContainerHigh = palette.cardFill,
+        surfaceContainerHighest = Color34,
+        outline = palette.outline,
+        outlineVariant = palette.line,
+        // The design has no red: attention is amber, and losing data is the only true error.
+        error = palette.warn,
+        onError = palette.onAccent,
     )
+
+    CompositionLocalProvider(LocalShelfPalette provides palette) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = SentinelTypography,
+            content = content,
+        )
+    }
+}
+
+/** Meter tracks and other "well" fills: `rgba(126,166,255,.12)`. */
+private val Color34 = androidx.compose.ui.graphics.Color(0x1F7EA6FF)
+
+/** Shorthand the screens read the design tokens through. */
+object Shelf {
+    val palette: ShelfPalette
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalShelfPalette.current
 }

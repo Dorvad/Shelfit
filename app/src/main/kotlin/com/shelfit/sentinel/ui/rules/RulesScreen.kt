@@ -6,44 +6,34 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shelfit.sentinel.AppContainer
-import com.shelfit.sentinel.R
 import com.shelfit.sentinel.core.smarthome.DeviceId
 import com.shelfit.sentinel.core.smarthome.SmartHomeCommand
 import com.shelfit.sentinel.core.trigger.TriggerId
+import com.shelfit.sentinel.ui.components.GhostButton
+import com.shelfit.sentinel.ui.components.GlassCard
+import com.shelfit.sentinel.ui.components.GradientButton
+import com.shelfit.sentinel.ui.components.LinkButton
 import com.shelfit.sentinel.ui.components.SectionCard
+import com.shelfit.sentinel.ui.components.SentinelScreen
+import com.shelfit.sentinel.ui.components.ShelfCheckbox
+import com.shelfit.sentinel.ui.components.ShelfDivider
+import com.shelfit.sentinel.ui.components.ShelfRadio
+import com.shelfit.sentinel.ui.components.ShelfSegmented
+import com.shelfit.sentinel.ui.components.ShelfSwitch
 import com.shelfit.sentinel.ui.theme.SentinelTheme
+import com.shelfit.sentinel.ui.theme.Shelf
 
 @Composable
 fun RulesRoute(
@@ -72,7 +62,6 @@ fun RulesRoute(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RulesScreen(
     uiState: RulesUiState,
@@ -93,36 +82,14 @@ fun RulesScreen(
 ) {
     val draft = uiState.draft
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        when {
-                            draft == null -> "Automations"
-                            draft.isNew -> "New automation"
-                            else -> "Edit automation"
-                        },
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = if (draft == null) onNavigateBack else onCancelDraft) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
-                        )
-                    }
-                },
-            )
+    SentinelScreen(
+        title = when {
+            draft == null -> "Automations"
+            draft.isNew -> "New automation"
+            else -> "Edit automation"
         },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        onNavigateBack = if (draft == null) onNavigateBack else onCancelDraft,
+    ) {
             if (draft == null) {
                 RuleList(
                     uiState = uiState,
@@ -148,7 +115,6 @@ fun RulesScreen(
                     onDelete = { onDeleteRule(draft.id) },
                 )
             }
-        }
     }
 }
 
@@ -185,12 +151,8 @@ private fun RuleList(
         }
     }
 
-    Button(onClick = onAddRule, modifier = Modifier.fillMaxWidth()) {
-        Text("Add automation")
-    }
-    TextButton(onClick = onResetToDefaults, modifier = Modifier.fillMaxWidth()) {
-        Text("Reset to defaults")
-    }
+    GradientButton(text = "Add automation", onClick = onAddRule)
+    LinkButton(text = "Reset to defaults", onClick = onResetToDefaults)
 
     Text(
         text = "Local actions run entirely on this phone. Smart-home actions need a home " +
@@ -208,13 +170,9 @@ private fun RuleCard(
     onEdit: () -> Unit,
     onSetEnabled: (Boolean) -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onEdit),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
+    GlassCard(
+        modifier = Modifier.clickable(onClick = onEdit),
+        contentPadding = 0.dp,
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -227,7 +185,7 @@ private fun RuleCard(
                 Text(
                     text = "WHEN",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = Shelf.palette.accent,
                 )
                 Text(
                     text = rule.triggerName,
@@ -237,7 +195,7 @@ private fun RuleCard(
                 Text(
                     text = "DO",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = Shelf.palette.accent,
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 Text(
@@ -258,7 +216,7 @@ private fun RuleCard(
                     )
                 }
             }
-            Switch(
+            ShelfSwitch(
                 checked = rule.enabled,
                 onCheckedChange = onSetEnabled,
                 enabled = rule.triggerAvailable,
@@ -267,7 +225,6 @@ private fun RuleCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RuleEditor(
     draft: RuleDraft,
@@ -342,25 +299,17 @@ private fun RuleEditor(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Switch(checked = draft.enabled, onCheckedChange = onDraftEnabled)
+            ShelfSwitch(checked = draft.enabled, onCheckedChange = onDraftEnabled)
         }
 
-        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        ShelfDivider(Modifier.padding(vertical = 4.dp))
 
         Text("Minimum gap between runs", style = MaterialTheme.typography.bodyLarge)
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            RulesViewModel.CooldownOptions.forEachIndexed { index, millis ->
-                SegmentedButton(
-                    selected = millis == draft.cooldownMillis,
-                    onClick = { onDraftCooldown(millis) },
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = RulesViewModel.CooldownOptions.size,
-                    ),
-                    label = { Text(millis.asSeconds()) },
-                )
-            }
-        }
+        ShelfSegmented(
+            options = RulesViewModel.CooldownOptions.map { it.asSeconds() },
+            selectedIndex = RulesViewModel.CooldownOptions.indexOf(draft.cooldownMillis),
+            onSelect = { onDraftCooldown(RulesViewModel.CooldownOptions[it]) },
+        )
         Text(
             text = "Stops one gesture running the action twice.",
             style = MaterialTheme.typography.bodySmall,
@@ -368,14 +317,12 @@ private fun RuleEditor(
         )
     }
 
-    Button(
+    GradientButton(
+        text = if (draft.isNew) "Add automation" else "Save changes",
         onClick = onSave,
         // An incomplete smart-home action would save a rule that fires and does nothing.
         enabled = draft.complete,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(if (draft.isNew) "Add automation" else "Save changes")
-    }
+    )
     if (!draft.complete) {
         Text(
             text = "Choose at least one device to save this automation.",
@@ -383,13 +330,9 @@ private fun RuleEditor(
             color = MaterialTheme.colorScheme.error,
         )
     }
-    OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-        Text("Cancel")
-    }
+    GhostButton(text = "Cancel", onClick = onCancel)
     if (!draft.isNew) {
-        TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
-            Text("Delete automation")
-        }
+        LinkButton(text = "Delete automation", onClick = onDelete)
     }
 }
 
@@ -400,7 +343,6 @@ private fun RuleEditor(
  * deliberate — a device that has left the home stays chosen and is called out, rather than
  * disappearing from a rule the user thought was configured.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SmartHomeActionEditor(
     draft: RuleDraft,
@@ -455,21 +397,16 @@ private fun SmartHomeActionEditor(
     }
 
     SectionCard("What to do with them") {
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            SmartHomeCommand.entries.forEachIndexed { index, command ->
-                SegmentedButton(
-                    selected = command == draft.command,
-                    onClick = { onCommand(command) },
-                    // Toggle needs to know the current state of every chosen device.
-                    enabled = command != SmartHomeCommand.TOGGLE || smartHome.toggleAvailable,
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = SmartHomeCommand.entries.size,
-                    ),
-                    label = { Text(command.label) },
-                )
-            }
-        }
+        ShelfSegmented(
+            options = SmartHomeCommand.entries.map { it.label },
+            selectedIndex = SmartHomeCommand.entries.indexOf(draft.command),
+            onSelect = { onCommand(SmartHomeCommand.entries[it]) },
+            // Toggle needs to know the current state of every chosen device.
+            enabled = { index ->
+                SmartHomeCommand.entries[index] != SmartHomeCommand.TOGGLE ||
+                    smartHome.toggleAvailable
+            },
+        )
         Text(
             text = if (smartHome.toggleAvailable) {
                 "Toggle switches each device to the opposite of what it is now."
@@ -493,7 +430,7 @@ private fun DeviceChoiceRow(device: DeviceChoiceUi, onToggle: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Checkbox(checked = device.chosen, onCheckedChange = { onToggle() })
+        ShelfCheckbox(checked = device.chosen)
         Column(modifier = Modifier.weight(1f)) {
             Text(device.name, style = MaterialTheme.typography.bodyLarge)
             Text(
@@ -527,7 +464,7 @@ private fun ChoiceRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        RadioButton(selected = selected, onClick = onSelect)
+        ShelfRadio(selected = selected)
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(

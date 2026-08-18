@@ -12,6 +12,7 @@ import com.shelfit.sentinel.ui.dashboard.DashboardRoute
 import com.shelfit.sentinel.ui.health.SensorHealthRoute
 import com.shelfit.sentinel.ui.rules.RulesRoute
 import com.shelfit.sentinel.ui.settings.SettingsRoute
+import com.shelfit.sentinel.ui.shelf.ShelfRoute
 import com.shelfit.sentinel.ui.smarthome.SmartHomeRoute
 
 /**
@@ -36,6 +37,14 @@ object Destination {
 
     /** Connect a smart home and see which devices this app can switch. */
     const val SMART_HOME = "smart-home"
+
+    /**
+     * The shelf face: near-black clock, breathing dot, detection ripples.
+     *
+     * What the phone shows while it sits and listens — the decor-object premise of the
+     * whole product, as a screen.
+     */
+    const val SHELF = "shelf"
 }
 
 @Composable
@@ -51,6 +60,13 @@ fun SentinelNavHost(
                 onOpenClapLab = { navController.navigate(Destination.CLAP_LAB) },
                 onOpenHealth = { navController.navigate(Destination.HEALTH) },
                 onOpenRules = { navController.navigate(Destination.RULES) },
+                onOpenShelf = { navController.navigate(Destination.SHELF) },
+            )
+        }
+        composable(Destination.SHELF) {
+            ShelfRoute(
+                container = container,
+                onExit = { navController.popBackStack() },
             )
         }
         composable(Destination.SETTINGS) {

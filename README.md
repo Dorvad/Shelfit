@@ -48,11 +48,16 @@ What exists:
 - A smart-home action: choose devices, choose on/off/toggle, get per-device results
   including partial success — working against Tuya, with three providers behind one interface
 - Passive LAN discovery of Tuya devices — no account, nothing sent, listens only
-- 311 unit tests, including synthetic speech, music, doors, table knocks, changing
+- 333 unit tests, including synthetic speech, music, doors, table knocks, changing
   room noise, rapid transient bursts, simulated microphone outages, the full
   clap → rule → executor path, every smart-home failure condition, the Tuya request
   signature, and LAN discovery packets in every frame format
-- A release build that passes R8 minification (~2.4 MB APK)
+- A **shelf display**: a dimmed always-on face — thin clock, a breathing dot while
+  listening, a ripple when a clap lands — so the phone on the shelf reads as a decor
+  object rather than an app left open
+- A committed dark design: one deep-blue palette, gradient controls, a variable-weight
+  typeface — no light mode, because a decor object does not turn white at sunrise
+- A release build that passes R8 minification (~2.8 MB APK)
 
 The intended device is an old phone left plugged in. The screen does not need to stay
 on, and nothing needs doing day to day — but Android reserves a few situations for the
@@ -311,7 +316,7 @@ build at your SDK with `ANDROID_HOME` or a `local.properties` containing
 
 ```bash
 ./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # 311 unit tests, JVM only, no microphone needed
+./gradlew :app:testDebugUnitTest    # 333 unit tests, JVM only, no microphone needed
 ./gradlew :app:lintDebug            # lint
 ./gradlew :app:installDebug         # install on a connected device
 ```

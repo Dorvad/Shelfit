@@ -5,54 +5,48 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shelfit.sentinel.AppContainer
-import com.shelfit.sentinel.R
-import com.shelfit.sentinel.trigger.audio.CalibrationStage
 import com.shelfit.sentinel.trigger.audio.CalibrationQuality
+import com.shelfit.sentinel.trigger.audio.CalibrationStage
 import com.shelfit.sentinel.trigger.audio.ClapCalibration
 import com.shelfit.sentinel.trigger.audio.ClapDiagnostics
 import com.shelfit.sentinel.trigger.audio.ClapProfile
+import com.shelfit.sentinel.ui.components.GhostButton
+import com.shelfit.sentinel.ui.components.GlassCard
+import com.shelfit.sentinel.ui.components.GradientButton
+import com.shelfit.sentinel.ui.components.HeroCard
 import com.shelfit.sentinel.ui.components.LabelledRow
 import com.shelfit.sentinel.ui.components.LevelMeter
+import com.shelfit.sentinel.ui.components.LinkButton
 import com.shelfit.sentinel.ui.components.SectionCard
+import com.shelfit.sentinel.ui.components.SentinelScreen
+import com.shelfit.sentinel.ui.components.ShelfDivider
 import com.shelfit.sentinel.ui.components.formatDecibels
 import com.shelfit.sentinel.ui.components.formatMultiple
 import com.shelfit.sentinel.ui.permission.MicrophonePermissionState
 import com.shelfit.sentinel.ui.permission.rememberMicrophonePermissionState
 import com.shelfit.sentinel.ui.theme.SentinelTheme
+import com.shelfit.sentinel.ui.theme.Shelf
 
 @Composable
 fun CalibrationRoute(
@@ -79,7 +73,6 @@ fun CalibrationRoute(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalibrationScreen(
     step: CalibrationStep,
@@ -92,50 +85,28 @@ fun CalibrationScreen(
     onDiscard: () -> Unit,
     onFinished: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Calibrate double clap") },
-                navigationIcon = {
-                    IconButton(onClick = onFinished) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
-                        )
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            when (step) {
-                CalibrationStep.Intro -> IntroStep(permission, onStart)
-                is CalibrationStep.Measuring -> MeasuringStep(step.stage, onDiscard)
-                is CalibrationStep.Review ->
-                    ReviewStep(step.calibration, step.profile, onBeginTrial, onSave, onStart)
+    SentinelScreen(title = "Calibrate double clap", onNavigateBack = onFinished) {
+        when (step) {
+            CalibrationStep.Intro -> IntroStep(permission, onStart)
+            is CalibrationStep.Measuring -> MeasuringStep(step.stage, onDiscard)
+            is CalibrationStep.Review ->
+                ReviewStep(step.calibration, step.profile, onBeginTrial, onSave, onStart)
 
-                is CalibrationStep.Trial ->
-                    TrialStep(diagnostics, onSave, onEndTrial)
+            is CalibrationStep.Trial ->
+                TrialStep(diagnostics, onSave, onEndTrial)
 
-                is CalibrationStep.Failed -> FailedStep(step.reason, onStart, onFinished)
-                CalibrationStep.Saved -> SavedStep(onFinished)
-            }
-
-            Text(
-                text = "Calibration measures levels and timings only. No audio is " +
-                    "recorded, and only the resulting numbers are saved.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            is CalibrationStep.Failed -> FailedStep(step.reason, onStart, onFinished)
+            CalibrationStep.Saved -> SavedStep(onFinished)
         }
+
+        Text(
+            text = "Calibration measures levels and timings only. No audio is " +
+                "recorded, and only the resulting numbers are saved.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Shelf.palette.textFaint,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        )
     }
 }
 
@@ -154,32 +125,22 @@ private fun IntroStep(permission: MicrophonePermissionState, onStart: () -> Unit
             "normally sit. Calibrating from a different distance is the most common " +
             "reason detection disappoints afterwards.",
         style = MaterialTheme.typography.bodyMedium,
+        color = Shelf.palette.textDim,
     )
 
     if (permission.granted) {
-        Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) {
-            Text("Start calibration")
-        }
+        GradientButton(text = "Start calibration", onClick = onStart)
     } else {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    "Microphone access is required",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-                if (permission.deniedAfterRequest) {
-                    Button(onClick = permission.openAppSettings) { Text("Open app settings") }
-                } else {
-                    Button(onClick = permission.request) { Text("Grant microphone access") }
-                }
+        GlassCard {
+            Text(
+                "Microphone access is required",
+                style = MaterialTheme.typography.titleMedium,
+                color = Shelf.palette.warn,
+            )
+            if (permission.deniedAfterRequest) {
+                GradientButton(text = "Open app settings", onClick = permission.openAppSettings)
+            } else {
+                GradientButton(text = "Grant microphone access", onClick = permission.request)
             }
         }
     }
@@ -193,10 +154,10 @@ private fun Step(number: Int, text: String) {
     ) {
         Text(
             text = "$number",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.titleMedium,
+            color = Shelf.palette.accent,
         )
-        Text(text, style = MaterialTheme.typography.bodyMedium)
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = Shelf.palette.text)
     }
 }
 
@@ -205,10 +166,7 @@ private fun MeasuringStep(stage: CalibrationStage, onDiscard: () -> Unit) {
     when (stage) {
         is CalibrationStage.MeasuringAmbient -> {
             Instruction("Measuring the room", "Stay quiet for a moment.")
-            LinearProgressIndicator(
-                progress = { stage.fraction },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            MeasureProgressBar(stage.fraction)
             LevelMeter(level = stage.level)
             LabelledRow("Room level", formatDecibels(stage.level))
         }
@@ -231,17 +189,46 @@ private fun MeasuringStep(stage: CalibrationStage, onDiscard: () -> Unit) {
         else -> Unit
     }
 
-    OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+    GhostButton(text = "Cancel", onClick = onDiscard)
+}
+
+/** Thin gradient progress track, matching the level meter's language. */
+@Composable
+private fun MeasureProgressBar(fraction: Float) {
+    val palette = Shelf.palette
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(Color(0x1A7EA6FF)),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(palette.accentStart, palette.accentEnd),
+                    ),
+                ),
+        )
+    }
 }
 
 @Composable
 private fun Instruction(title: String, body: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, style = MaterialTheme.typography.headlineSmall)
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineLarge,
+            color = Shelf.palette.text,
+        )
         Text(
             body,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textDim,
         )
     }
 }
@@ -249,21 +236,27 @@ private fun Instruction(title: String, body: String) {
 /** One filled dot per clap heard, so progress is obvious at arm's length. */
 @Composable
 private fun ClapProgress(collected: Int, required: Int) {
+    val palette = Shelf.palette
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         repeat(required) { index ->
+            val filled = index < collected
             Box(
                 modifier = Modifier
                     .size(DOT_SIZE)
+                    .clip(CircleShape)
                     .background(
-                        color = if (index < collected) {
-                            MaterialTheme.colorScheme.primary
+                        if (filled) {
+                            Brush.linearGradient(
+                                listOf(palette.accentStart, palette.accentEnd),
+                            )
                         } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
+                            Brush.linearGradient(
+                                listOf(Color(0x1F7EA6FF), Color(0x1F7EA6FF)),
+                            )
                         },
-                        shape = CircleShape,
                     ),
             )
         }
@@ -296,66 +289,54 @@ private fun ReviewStep(
         LabelledRow("Decay window", "${profile.maxTransientMillis} ms")
     }
 
-    Button(onClick = onBeginTrial, modifier = Modifier.fillMaxWidth()) {
-        Text("Try it out")
-    }
-    OutlinedButton(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
-        Text("Save without testing")
-    }
-    TextButton(onClick = onRedo, modifier = Modifier.fillMaxWidth()) {
-        Text("Measure again")
-    }
+    GradientButton(text = "Try it out", onClick = onBeginTrial)
+    GhostButton(text = "Save without testing", onClick = onSave)
+    LinkButton(text = "Measure again", onClick = onRedo)
 }
 
 @Composable
 private fun QualityCard(calibration: ClapCalibration) {
+    val palette = Shelf.palette
     val quality = calibration.quality
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = when (quality) {
-                CalibrationQuality.GOOD -> MaterialTheme.colorScheme.primaryContainer
-                CalibrationQuality.MARGINAL -> MaterialTheme.colorScheme.tertiaryContainer
-                CalibrationQuality.POOR -> MaterialTheme.colorScheme.errorContainer
+    val titleColor = when (quality) {
+        CalibrationQuality.GOOD -> palette.cyan
+        CalibrationQuality.MARGINAL -> palette.warn
+        CalibrationQuality.POOR -> palette.warn
+    }
+    HeroCard {
+        Text(
+            text = when (quality) {
+                CalibrationQuality.GOOD -> "Good separation"
+                CalibrationQuality.MARGINAL -> "Usable, but tight"
+                CalibrationQuality.POOR -> "Poor separation"
             },
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = when (quality) {
-                    CalibrationQuality.GOOD -> "Good separation"
-                    CalibrationQuality.MARGINAL -> "Usable, but tight"
-                    CalibrationQuality.POOR -> "Poor separation"
-                },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Your claps measured ${calibration.headroomDecibels.toInt()} dB " +
-                    "above the room.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                text = when (quality) {
-                    CalibrationQuality.GOOD ->
-                        "Detection should be reliable here."
+            style = MaterialTheme.typography.headlineSmall,
+            color = titleColor,
+        )
+        Text(
+            text = "Your claps measured ${calibration.headroomDecibels.toInt()} dB " +
+                "above the room.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.text,
+        )
+        Text(
+            text = when (quality) {
+                CalibrationQuality.GOOD ->
+                    "Detection should be reliable here."
 
-                    CalibrationQuality.MARGINAL ->
-                        "Expect the occasional miss, or the occasional false trigger. " +
-                            "Clapping closer to the phone, or moving it away from a " +
-                            "noise source, would help."
+                CalibrationQuality.MARGINAL ->
+                    "Expect the occasional miss, or the occasional false trigger. " +
+                        "Clapping closer to the phone, or moving it away from a " +
+                        "noise source, would help."
 
-                    CalibrationQuality.POOR ->
-                        "The room is nearly as loud as your claps, so no threshold " +
-                            "will work well. Try again somewhere quieter, or place " +
-                            "the phone closer to where you clap."
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
+                CalibrationQuality.POOR ->
+                    "The room is nearly as loud as your claps, so no threshold " +
+                        "will work well. Try again somewhere quieter, or place " +
+                        "the phone closer to where you clap."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.textDim,
+        )
     }
 }
 
@@ -365,44 +346,36 @@ private fun TrialStep(
     onSave: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val palette = Shelf.palette
+    val detected = diagnostics.detectionCount > 0
+
     Instruction(
         title = "Try a double clap",
         body = "The new settings are running but not saved. Clap twice and see whether " +
             "it registers.",
     )
 
-    Card(
-        modifier = Modifier.fillMaxWidth().height(TRIAL_BANNER_HEIGHT),
-        colors = CardDefaults.cardColors(
-            containerColor = if (diagnostics.detectionCount > 0) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            },
-        ),
-    ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    HeroCard {
+        Column(
+            modifier = Modifier.fillMaxWidth().height(TRIAL_BANNER_HEIGHT),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = if (detected) {
+                    "Detected ${diagnostics.detectionCount}x"
+                } else {
+                    "Listening…"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                color = if (detected) palette.cyan else palette.textDim,
+            )
+            diagnostics.lastGapMillis?.let { gap ->
                 Text(
-                    text = if (diagnostics.detectionCount > 0) {
-                        "Detected ${diagnostics.detectionCount}x"
-                    } else {
-                        "Listening…"
-                    },
-                    style = MaterialTheme.typography.titleLarge,
-                    color = if (diagnostics.detectionCount > 0) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    "$gap ms apart",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.text,
                 )
-                diagnostics.lastGapMillis?.let { gap ->
-                    Text(
-                        "$gap ms apart",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
             }
         }
     }
@@ -414,40 +387,26 @@ private fun TrialStep(
     )
     LabelledRow("Claps accepted", diagnostics.candidateCount.toString())
 
-    Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
-        Text("Works — save it")
-    }
-    OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-        Text("Back to results")
-    }
+    GradientButton(text = "Works — save it", onClick = onSave)
+    GhostButton(text = "Back to results", onClick = onBack)
 }
 
 @Composable
 private fun FailedStep(reason: String, onRetry: () -> Unit, onFinished: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                "Calibration did not finish",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            Text(
-                reason,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-        }
+    GlassCard {
+        Text(
+            "Calibration did not finish",
+            style = MaterialTheme.typography.titleMedium,
+            color = Shelf.palette.warn,
+        )
+        Text(
+            reason,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Shelf.palette.text,
+        )
     }
-    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
-    TextButton(onClick = onFinished, modifier = Modifier.fillMaxWidth()) { Text("Give up") }
+    GradientButton(text = "Try again", onClick = onRetry)
+    LinkButton(text = "Give up", onClick = onFinished)
 }
 
 @Composable
@@ -456,21 +415,22 @@ private fun SavedStep(onFinished: () -> Unit) {
         Text(
             "Detection now uses settings measured on this phone, in this room.",
             style = MaterialTheme.typography.bodyMedium,
+            color = Shelf.palette.text,
         )
-        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        ShelfDivider(Modifier.padding(vertical = 4.dp))
         Text(
             "Recalibrate if you move the phone, change rooms, or the background " +
                 "noise changes for good.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textDim,
         )
     }
-    Button(onClick = onFinished, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+    GradientButton(text = "Done", onClick = onFinished)
 }
 
 private const val MILLIS_PER_SECOND = 1_000L
 private val DOT_SIZE = 16.dp
-private val TRIAL_BANNER_HEIGHT = 120.dp
+private val TRIAL_BANNER_HEIGHT = 110.dp
 
 @Preview(showBackground = true)
 @Composable

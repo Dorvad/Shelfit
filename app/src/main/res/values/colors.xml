@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launch_background">#FFFCFCFF</color>
-    <color name="ic_launcher_background">#FF00639B</color>
+    <!-- The screen gradient's top stop, so launch blends into the first frame. -->
+    <color name="launch_background">#FF152A52</color>
+    <color name="ic_launcher_background">#FF0C1A36</color>
 </resources>

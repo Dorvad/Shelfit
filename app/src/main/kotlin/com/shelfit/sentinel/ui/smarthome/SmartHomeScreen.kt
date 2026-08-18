@@ -7,24 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,9 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -43,14 +26,22 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shelfit.sentinel.AppContainer
-import com.shelfit.sentinel.R
 import com.shelfit.sentinel.core.smarthome.SmartHomeProvider
 import com.shelfit.sentinel.core.smarthome.SmartHomeStructure
 import com.shelfit.sentinel.core.smarthome.StructureId
 import com.shelfit.sentinel.platform.smarthome.SimulatedSmartHomeClient
 import com.shelfit.sentinel.platform.smarthome.tuya.TuyaRegion
+import com.shelfit.sentinel.ui.components.GhostButton
+import com.shelfit.sentinel.ui.components.GradientButton
+import com.shelfit.sentinel.ui.components.LinkButton
+import com.shelfit.sentinel.ui.components.PillTone
 import com.shelfit.sentinel.ui.components.SectionCard
+import com.shelfit.sentinel.ui.components.SentinelScreen
+import com.shelfit.sentinel.ui.components.ShelfDivider
+import com.shelfit.sentinel.ui.components.ShelfRadio
+import com.shelfit.sentinel.ui.components.StatusPill
 import com.shelfit.sentinel.ui.theme.SentinelTheme
+import com.shelfit.sentinel.ui.theme.Shelf
 
 @Composable
 fun SmartHomeRoute(
@@ -87,7 +78,6 @@ fun SmartHomeRoute(
  * the automation, not here. This screen answers "is it connected, and can it see my lamp" —
  * the two questions worth answering before a rule is blamed for not working.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmartHomeScreen(
     uiState: SmartHomeUiState,
@@ -105,28 +95,7 @@ fun SmartHomeScreen(
     onSimulatorFault: (SimulatedSmartHomeClient.Fault) -> Unit,
     onNavigateBack: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Smart home") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
-                        )
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+    SentinelScreen(title = "Smart home", onNavigateBack = onNavigateBack) {
             ProviderCard(provider = uiState.provider, onProvider = onProvider)
 
             if (uiState.provider == SmartHomeProvider.TUYA) {
@@ -178,7 +147,6 @@ fun SmartHomeScreen(
                 FaultCard(uiState = uiState, onSimulatorFault = onSimulatorFault)
             }
         }
-    }
 }
 
 @Composable
@@ -189,36 +157,25 @@ private fun ConnectionCard(
     onRefresh: () -> Unit,
 ) {
     SectionCard("Connection") {
-        Text(
+        StatusPill(
             text = uiState.connectionLabel,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
+            tone = if (uiState.connected) PillTone.Good else PillTone.Neutral,
         )
         Text(
             text = uiState.connectionDetail,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textDim,
         )
 
         if (uiState.connected) {
-            OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) {
-                Text("Disconnect")
-            }
-            TextButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
-                Text("Check again")
-            }
+            GhostButton(text = "Disconnect", onClick = onDisconnect)
+            LinkButton(text = "Check again", onClick = onRefresh)
         } else {
-            Button(
+            GradientButton(
+                text = if (uiState.connecting) "Connecting…" else "Connect",
                 onClick = onConnect,
-                enabled = uiState.canConnect,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (uiState.connecting) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                } else {
-                    Text("Connect")
-                }
-            }
+                enabled = uiState.canConnect && !uiState.connecting,
+            )
         }
     }
 }
@@ -235,7 +192,7 @@ private fun DeviceCard(uiState: SmartHomeUiState, onReload: () -> Unit) {
             uiState.deviceProblem != null -> Text(
                 text = uiState.deviceProblem,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
+                color = Shelf.palette.warn,
             )
 
             uiState.devices.isEmpty() -> Text(
@@ -246,15 +203,13 @@ private fun DeviceCard(uiState: SmartHomeUiState, onReload: () -> Unit) {
             else -> uiState.devices.forEach { device -> DeviceRow(device) }
         }
 
-        TextButton(onClick = onReload, modifier = Modifier.fillMaxWidth()) {
-            Text("Reload")
-        }
+        LinkButton(text = "Reload", onClick = onReload)
         Text(
             text = "Only lights and smart plugs are supported for now. Other devices are " +
                 "listed so you can see they were found, but this app will not try to " +
                 "operate them.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textFaint,
         )
     }
 }
@@ -265,19 +220,15 @@ private fun DeviceRow(device: DeviceRowUi) {
         Text(
             text = device.name,
             style = MaterialTheme.typography.bodyLarge,
-            color = if (device.selectable) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+            color = if (device.selectable) Shelf.palette.text else Shelf.palette.textDim,
         )
         Text(
             text = "${device.detail} · ${device.statusLabel}",
             style = MaterialTheme.typography.bodySmall,
             color = if (device.selectable && device.reachable) {
-                MaterialTheme.colorScheme.onSurfaceVariant
+                Shelf.palette.textDim
             } else {
-                MaterialTheme.colorScheme.error
+                Shelf.palette.warn
             },
         )
     }
@@ -295,10 +246,14 @@ private fun StructureRow(
             .clickable(onClick = onSelect)
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        RadioButton(selected = selected, onClick = onSelect)
-        Text(structure.name, style = MaterialTheme.typography.bodyLarge)
+        ShelfRadio(selected = selected)
+        Text(
+            structure.name,
+            style = MaterialTheme.typography.bodyLarge,
+            color = Shelf.palette.text,
+        )
     }
 }
 
@@ -316,15 +271,19 @@ private fun ProviderCard(
                     .clickable { onProvider(option) }
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                RadioButton(selected = option == provider, onClick = { onProvider(option) })
+                ShelfRadio(selected = option == provider)
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(option.label, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        option.label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Shelf.palette.text,
+                    )
                     Text(
                         text = option.description,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Shelf.palette.textDim,
                     )
                 }
             }
@@ -356,15 +315,14 @@ private fun TuyaCard(
                 text = "Keys are saved for ${uiState.tuyaRegion.label} " +
                     "(${uiState.tuyaRegion.code}).",
                 style = MaterialTheme.typography.bodyMedium,
+                color = Shelf.palette.text,
             )
-            OutlinedButton(onClick = onClearTuya, modifier = Modifier.fillMaxWidth()) {
-                Text("Remove keys")
-            }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            GhostButton(text = "Remove keys", onClick = onClearTuya)
+            ShelfDivider(Modifier.padding(vertical = 8.dp))
             Text(
                 text = "Enter new keys below to replace them.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Shelf.palette.textDim,
             )
         } else {
             Text(
@@ -372,7 +330,7 @@ private fun TuyaCard(
                     "your Smart Life app account to it, then paste its two keys here. " +
                     "See docs/tuya-setup.md for the walkthrough.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Shelf.palette.textDim,
             )
         }
 
@@ -396,36 +354,45 @@ private fun TuyaCard(
         Text(
             text = "Data centre",
             style = MaterialTheme.typography.bodyMedium,
+            color = Shelf.palette.text,
             modifier = Modifier.padding(top = 4.dp),
         )
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             TuyaRegion.entries.forEach { option ->
-                FilterChip(
-                    selected = option == region,
-                    onClick = { region = option },
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { region = option }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ShelfRadio(selected = option == region)
                     // The code is shown too, so it can be matched against the Tuya console
                     // and against tinytuya, both of which name regions that way.
-                    label = { Text("${option.label} (${option.code})") },
-                )
+                    Text(
+                        text = "${option.label} (${option.code})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Shelf.palette.text,
+                    )
+                }
             }
         }
         Text(
             text = "Must match the project's data centre in the Tuya console. The wrong one " +
                 "looks exactly like a wrong key.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textDim,
         )
 
-        Button(
+        GradientButton(
+            text = "Save and connect",
             onClick = {
                 onSaveTuya(accessId, accessSecret, region)
                 accessSecret = ""
             },
             enabled = accessId.isNotBlank() && accessSecret.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Save and connect")
-        }
+        )
     }
 }
 
@@ -443,7 +410,7 @@ private fun LanScanCard(uiState: SmartHomeUiState, onScanLan: () -> Unit) {
             text = "Tuya devices announce themselves on your Wi-Fi. Scanning finds them " +
                 "without any account, and reports which protocol each one speaks.",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textDim,
         )
 
         val found = uiState.lanDevices
@@ -460,30 +427,28 @@ private fun LanScanCard(uiState: SmartHomeUiState, onScanLan: () -> Unit) {
                     "devices, and that the router does not have client isolation or " +
                     "\"AP isolation\" switched on.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
+                color = Shelf.palette.warn,
             )
 
             else -> found.forEach { device -> LanDeviceRow(device) }
         }
 
-        Button(
+        GradientButton(
+            text = when {
+                uiState.lanScanning -> "Listening…"
+                found == null -> "Scan local network"
+                else -> "Scan again"
+            },
             onClick = onScanLan,
             enabled = !uiState.lanScanning,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (uiState.lanScanning) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp))
-            } else {
-                Text(if (found == null) "Scan local network" else "Scan again")
-            }
-        }
+        )
 
         if (!found.isNullOrEmpty()) {
             Text(
                 text = "Local switching is not built yet — these are listed so you can see " +
                     "which protocol version you have. See docs/tuya-lan.md.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Shelf.palette.textFaint,
             )
         }
     }
@@ -495,18 +460,19 @@ private fun LanDeviceRow(device: LanDeviceRowUi) {
         Text(
             text = device.name ?: device.ip,
             style = MaterialTheme.typography.bodyLarge,
+            color = Shelf.palette.text,
         )
         Text(
             text = "${device.ip} · ${device.protocolLabel}",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textDim,
         )
         SelectionContainer {
             Text(
                 text = device.deviceId,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Shelf.palette.textDim,
             )
         }
     }
@@ -530,39 +496,41 @@ private fun LocalKeysCard(
             text = "Local control needs one secret per device, and only the cloud has it. " +
                 "You need these once — write them down somewhere safe.",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textDim,
         )
 
         uiState.localKeysProblem?.let { problem ->
             Text(
                 text = problem,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
+                color = Shelf.palette.warn,
             )
         }
 
         val keys = uiState.localKeys
         if (keys.isNullOrEmpty()) {
-            Button(onClick = onReveal, modifier = Modifier.fillMaxWidth()) {
-                Text("Show local keys")
-            }
+            GradientButton(text = "Show local keys", onClick = onReveal)
         } else {
             keys.forEach { key ->
                 Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                    Text(key.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        key.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Shelf.palette.text,
+                    )
                     Text(
                         text = key.reachability,
                         style = MaterialTheme.typography.bodySmall,
                         color = if (key.directlyReachable) {
-                            MaterialTheme.colorScheme.primary
+                            Shelf.palette.cyan
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            Shelf.palette.textDim
                         },
                     )
                     Text(
                         text = "Local key",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = Shelf.palette.accent,
                     )
                     // Selectable so the value can be copied out rather than transcribed by eye.
                     SelectionContainer {
@@ -570,31 +538,31 @@ private fun LocalKeysCard(
                             text = key.localKey,
                             style = MaterialTheme.typography.bodyMedium,
                             fontFamily = FontFamily.Monospace,
+                            color = Shelf.palette.text,
                         )
                     }
                     Text(
                         text = "Device ID",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = Shelf.palette.accent,
                     )
                     SelectionContainer {
                         Text(
                             text = key.deviceId,
                             style = MaterialTheme.typography.bodyMedium,
                             fontFamily = FontFamily.Monospace,
+                            color = Shelf.palette.text,
                         )
                     }
                 }
-                HorizontalDivider()
+                ShelfDivider()
             }
-            OutlinedButton(onClick = onHide, modifier = Modifier.fillMaxWidth()) {
-                Text("Hide")
-            }
+            GhostButton(text = "Hide", onClick = onHide)
             Text(
                 text = "Treat these like passwords. Anyone on your Wi-Fi with a device key can " +
                     "switch that device. They change if you reset or re-pair it.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+                color = Shelf.palette.warn,
             )
         }
     }
@@ -612,20 +580,30 @@ private fun FaultCard(
     onSimulatorFault: (SimulatedSmartHomeClient.Fault) -> Unit,
 ) {
     SectionCard("Simulate a problem") {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             SimulatedSmartHomeClient.Fault.entries.forEach { fault ->
-                FilterChip(
-                    selected = fault == uiState.simulatorFault,
-                    onClick = { onSimulatorFault(fault) },
-                    label = { Text(fault.label()) },
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSimulatorFault(fault) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ShelfRadio(selected = fault == uiState.simulatorFault)
+                    Text(
+                        text = fault.label(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Shelf.palette.text,
+                    )
+                }
             }
         }
         Text(
             text = "Each one stays in force until you change it, so you can see what the app " +
                 "does about it.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Shelf.palette.textFaint,
         )
     }
 }
