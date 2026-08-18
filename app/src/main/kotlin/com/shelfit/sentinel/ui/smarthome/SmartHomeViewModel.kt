@@ -361,9 +361,14 @@ class SmartHomeViewModel(private val container: AppContainer) : ViewModel() {
                 else -> "Connected. Choose which home to use."
             }
 
-            is SmartHomeState.Unavailable ->
-                "Could not reach your home: ${failure.kind.describe()}." +
-                    if (failure.needsUserAction) "" else " This usually clears on its own."
+            is SmartHomeState.Unavailable -> buildString {
+                append("Could not reach your home: ${failure.kind.describe()}.")
+                // The provider's own words, verbatim. A paraphrase is what makes a console
+                // problem look like a password problem, and it is the difference between a
+                // user fixing it and being stuck.
+                failure.detail?.let { append("\n\n").append(it) }
+                if (!failure.needsUserAction) append("\n\nThis often clears on its own.")
+            }
         }
 
         private fun SmartHomeDeviceList.problem(): String? = failure?.let { failure ->

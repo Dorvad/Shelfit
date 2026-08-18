@@ -56,6 +56,21 @@ internal sealed interface TuyaResponse {
 }
 
 /**
+ * What [TuyaCloudClient] needs from the network, as a seam.
+ *
+ * Exists because the first version of this integration shipped with a wrong endpoint and
+ * nobody could have noticed: the client built its own HTTP layer, so there was no way to run
+ * it against a known Tuya response. Behind this interface a test can hand the client the exact
+ * JSON Tuya documents, which is how the endpoint is now pinned.
+ */
+internal interface TuyaApi {
+    fun forgetToken()
+    suspend fun verifyCredentials(): TuyaResponse
+    suspend fun get(path: String, query: Map<String, String> = emptyMap()): TuyaResponse
+    suspend fun post(path: String, body: String): TuyaResponse
+}
+
+/**
  * The HTTP half of the Tuya integration: signed requests, JSON in and out.
  *
  * No HTTP or JSON library. `HttpsURLConnection` and `org.json` are both in the Android
@@ -73,25 +88,25 @@ internal sealed interface TuyaResponse {
  */
 internal class TuyaCloudApi(
     private val credentials: () -> TuyaCredentials,
-) {
+) : TuyaApi {
 
     private data class Token(val value: String, val expiresAtMillis: Long)
 
     private var token: Token? = null
 
     /** Invalidates the cached token, so the next call fetches a fresh one. */
-    fun forgetToken() {
+    override fun forgetToken() {
         token = null
     }
 
-    suspend fun get(path: String, query: Map<String, String> = emptyMap()): TuyaResponse =
+    override suspend fun get(path: String, query: Map<String, String>): TuyaResponse =
         authorised("GET", TuyaSignature.pathWithQuery(path, query), body = null)
 
-    suspend fun post(path: String, body: String): TuyaResponse =
+    override suspend fun post(path: String, body: String): TuyaResponse =
         authorised("POST", path, body)
 
     /** Proves the credentials work, without caring about the result. */
-    suspend fun verifyCredentials(): TuyaResponse = when (val fresh = fetchToken()) {
+    override suspend fun verifyCredentials(): TuyaResponse = when (val fresh = fetchToken()) {
         is TuyaResponse.Error -> fresh
         is TuyaResponse.Ok -> fresh
     }
@@ -153,20 +168,6 @@ internal class TuyaCloudApi(
         }
 
         return response
-    }
-
-    /** The uid of the linked app account, needed to list devices. Read from the token call. */
-    suspend fun linkedUid(): String? {
-        val response = request(
-            method = "GET",
-            pathWithQuery = TuyaSignature.pathWithQuery(TOKEN_PATH, mapOf("grant_type" to "1")),
-            body = null,
-            accessToken = null,
-        )
-        return (response as? TuyaResponse.Ok)
-            ?.json?.optJSONObject("result")
-            ?.optString("uid")
-            ?.takeIf { it.isNotEmpty() }
     }
 
     private suspend fun request(
@@ -267,31 +268,42 @@ internal class TuyaCloudApi(
     }
 
     /**
-     * Maps a Tuya error onto our own vocabulary.
+     * Maps a Tuya error onto our own vocabulary, **keeping Tuya's own words**.
      *
-     * Matched on the message as well as the numeric code: Tuya's codes are stable but sparsely
-     * documented, and a token problem reported under an unfamiliar code should still lead the
-     * user to reconnect rather than to a shrug.
+     * The detail always carries the provider's code and message verbatim. That is not
+     * clutter: a paraphrase of "permission deny" reads as "reconnect your account", which
+     * sends a user to fix the one thing that was never broken. Whatever we conclude, the
+     * original text stays visible so the real cause is recoverable.
+     *
+     * Matched on the message as well as the code because Tuya's codes are sparsely
+     * documented and vary by endpoint.
      */
     private fun failureFor(code: String, message: String): SmartHomeFailure {
         val lower = message.lowercase()
         val kind = when {
-            lower.contains("token") -> SmartHomeFailure.Kind.PERMISSION_DENIED
+            // Bad keys or a bad clock. Nothing about the account is wrong.
             lower.contains("sign") -> SmartHomeFailure.Kind.PERMISSION_DENIED
-            lower.contains("permission") -> SmartHomeFailure.Kind.PERMISSION_DENIED
-            lower.contains("authoriz") || lower.contains("authoris") ->
-                SmartHomeFailure.Kind.PERMISSION_DENIED
+            lower.contains("token") -> SmartHomeFailure.Kind.PERMISSION_DENIED
 
-            // A lapsed IoT Core subscription is the single most likely cause of an
-            // automation that worked last month and does not today.
-            lower.contains("expire") -> SmartHomeFailure.Kind.PERMISSION_DENIED
+            // "No permissions"/"not subscribed" means a service is not enabled on the cloud
+            // project — a console problem, not a consent problem, so it must not be reported
+            // as "reconnect".
+            lower.contains("not subscrib") || lower.contains("no permission") ->
+                SmartHomeFailure.Kind.HOME_UNAVAILABLE
+
+            lower.contains("expire") -> SmartHomeFailure.Kind.HOME_UNAVAILABLE
+            lower.contains("permission") -> SmartHomeFailure.Kind.HOME_UNAVAILABLE
+
             lower.contains("offline") -> SmartHomeFailure.Kind.DEVICE_OFFLINE
             lower.contains("not exist") || lower.contains("not found") ->
                 SmartHomeFailure.Kind.DEVICE_REMOVED
 
             else -> SmartHomeFailure.Kind.COMMAND_REJECTED
         }
-        return SmartHomeFailure(kind = kind, detail = message)
+        return SmartHomeFailure(
+            kind = kind,
+            detail = if (code.isEmpty()) message else "Tuya $code: $message",
+        )
     }
 
     private companion object {

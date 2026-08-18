@@ -44,11 +44,13 @@ import org.json.JSONObject
  * [SmartHomeCommand.TOGGLE] needs. That is one extra round trip on ON and OFF, and it buys
  * correctness across devices this code has never seen.
  */
-class TuyaCloudClient(
+class TuyaCloudClient internal constructor(
     credentials: () -> TuyaCredentials,
+    private val api: TuyaApi,
 ) : SmartHomeClient {
 
-    private val api = TuyaCloudApi(credentials)
+    constructor(credentials: () -> TuyaCredentials) : this(credentials, TuyaCloudApi(credentials))
+
     private val readCredentials = credentials
 
     private val _state = MutableStateFlow<SmartHomeState>(SmartHomeState.NotConnected)
@@ -59,7 +61,7 @@ class TuyaCloudClient(
     /** Serialises connect/refresh so two screens cannot fight over the cached uid. */
     private val mutex = Mutex()
 
-    private var uid: String? = null
+    private var connected = false
 
     override suspend fun connect(): SmartHomeResult<Unit> = mutex.withLock {
         if (!readCredentials().complete) {
@@ -73,26 +75,50 @@ class TuyaCloudClient(
         }
 
         api.forgetToken()
-        val discovered = api.linkedUid()
-        if (discovered == null) {
-            // Credentials that authenticate but yield no uid mean the cloud project has no
-            // app account linked — a distinct problem from bad keys, and a common one.
-            val failure = SmartHomeFailure(
-                SmartHomeFailure.Kind.HOME_UNAVAILABLE,
-                detail = "No Tuya app account is linked to this cloud project",
-            )
-            _state.value = SmartHomeState.Unavailable(failure)
-            return@withLock SmartHomeResult.Failure(failure)
+
+        // Two separate questions, reported separately, because they have different fixes.
+        // "Are the keys and data centre right" is answered by the token call; "can this
+        // project see your devices" is answered by the device list. Collapsing them is how a
+        // console problem ends up reported as a credentials problem.
+        when (val token = api.verifyCredentials()) {
+            is TuyaResponse.Error -> {
+                _state.value = SmartHomeState.Unavailable(token.failure)
+                return@withLock SmartHomeResult.Failure(token.failure)
+            }
+
+            is TuyaResponse.Ok -> Unit
         }
 
-        uid = discovered
-        _state.value = SmartHomeState.Connected(structures = listOf(structureFor(discovered)))
-        SmartHomeResult.Success(Unit)
+        when (val listed = fetchDevices()) {
+            is SmartHomeResult.Failure -> {
+                _state.value = SmartHomeState.Unavailable(listed.failure)
+                return@withLock SmartHomeResult.Failure(listed.failure)
+            }
+
+            is SmartHomeResult.Success -> {
+                if (listed.value.isEmpty()) {
+                    // The keys work and the call is permitted, but the project is not
+                    // associated with any app account — the commonest setup mistake, and
+                    // precisely distinguishable from every other failure.
+                    val failure = SmartHomeFailure(
+                        SmartHomeFailure.Kind.HOME_UNAVAILABLE,
+                        detail = "Your keys work, but no devices are shared with this cloud " +
+                            "project. In the Tuya console, open your project's Devices tab " +
+                            "and use Link Tuya App Account — not the Users tab.",
+                    )
+                    _state.value = SmartHomeState.Unavailable(failure)
+                    return@withLock SmartHomeResult.Failure(failure)
+                }
+                connected = true
+                _state.value = SmartHomeState.Connected(structures = listOf(ACCOUNT_STRUCTURE))
+                SmartHomeResult.Success(Unit)
+            }
+        }
     }
 
     override suspend fun disconnect() {
         mutex.withLock {
-            uid = null
+            connected = false
             api.forgetToken()
             _state.value = SmartHomeState.NotConnected
         }
@@ -101,7 +127,7 @@ class TuyaCloudClient(
     override suspend fun refresh() {
         // Only re-check when we believe we are connected. Refreshing an unconfigured provider
         // on every screen resume would make pointless network calls on a phone left running.
-        if (uid == null && !_state.value.isConnected) return
+        if (!connected && !_state.value.isConnected) return
         connect()
     }
 
@@ -113,29 +139,74 @@ class TuyaCloudClient(
     override suspend fun devices(
         structureId: StructureId,
     ): SmartHomeResult<List<SmartHomeDevice>> {
-        val account = uid ?: return SmartHomeResult.Failure(
-            SmartHomeFailure(SmartHomeFailure.Kind.NOT_CONNECTED),
-        )
-
-        return when (val response = api.get("/v1.0/users/$account/devices")) {
-            is TuyaResponse.Error -> {
-                if (response.failure.kind == SmartHomeFailure.Kind.PERMISSION_DENIED) {
-                    _state.value = SmartHomeState.PermissionRequired
-                }
-                SmartHomeResult.Failure(response.failure)
-            }
-
-            is TuyaResponse.Ok -> SmartHomeResult.Success(
-                response.json.optJSONArray("result").objects().map(::toDevice),
+        if (!connected) {
+            return SmartHomeResult.Failure(
+                SmartHomeFailure(SmartHomeFailure.Kind.NOT_CONNECTED),
             )
         }
+        return when (val listed = fetchDevices()) {
+            is SmartHomeResult.Failure -> {
+                _state.value = SmartHomeState.Unavailable(listed.failure)
+                SmartHomeResult.Failure(listed.failure)
+            }
+
+            is SmartHomeResult.Success ->
+                SmartHomeResult.Success(listed.value.map(::toDevice))
+        }
+    }
+
+    /**
+     * Every device shared with this cloud project, as raw JSON.
+     *
+     * Uses `/v1.0/iot-01/associated-users/devices`, which needs **no user id**. The obvious
+     * alternative, `/v1.0/users/{uid}/devices`, needs the linked app account's id — and the
+     * `uid` in a client-credentials token response is the *project's* identifier, not that
+     * account's. Using it produces a permission error that reads exactly like bad keys, which
+     * is a genuinely misleading dead end. This endpoint sidesteps the whole question.
+     *
+     * Paged, because a large home exceeds one response. The page cap is a guard against a
+     * malformed `has_more` looping for ever rather than a real limit.
+     */
+    private suspend fun fetchDevices(): SmartHomeResult<List<JSONObject>> {
+        val collected = mutableListOf<JSONObject>()
+        var lastRowKey: String? = null
+
+        repeat(MAX_PAGES) {
+            val query = buildMap {
+                put("size", PAGE_SIZE.toString())
+                lastRowKey?.let { put("last_row_key", it) }
+            }
+
+            when (val response = api.get(DEVICE_LIST_PATH, query)) {
+                is TuyaResponse.Error -> return SmartHomeResult.Failure(response.failure)
+
+                is TuyaResponse.Ok -> {
+                    val result = response.json.optJSONObject("result")
+                        ?: return SmartHomeResult.Success(collected)
+
+                    // The all-devices form returns "devices"; the by-user form returns "list".
+                    // Accepting both costs one line and survives Tuya changing which it uses.
+                    val page = (result.optJSONArray("devices") ?: result.optJSONArray("list"))
+                        .objects()
+                    collected += page
+
+                    val hasMore = result.optBoolean("has_more", false)
+                    lastRowKey = result.optString("last_row_key").ifEmpty { null }
+                    if (!hasMore || lastRowKey == null || page.isEmpty()) {
+                        return SmartHomeResult.Success(collected)
+                    }
+                }
+            }
+        }
+
+        return SmartHomeResult.Success(collected)
     }
 
     override suspend fun execute(
         command: SmartHomeCommand,
         targets: List<Pair<DeviceId, String>>,
     ): DeviceCommandReport {
-        if (uid == null) {
+        if (!connected) {
             return DeviceCommandReport.allFailing(
                 targets,
                 SmartHomeFailure(SmartHomeFailure.Kind.NOT_CONNECTED),
@@ -217,15 +288,17 @@ class TuyaCloudClient(
      * caller and forgotten.
      */
     suspend fun localCredentials(): SmartHomeResult<List<TuyaLocalCredential>> {
-        val account = uid ?: return SmartHomeResult.Failure(
-            SmartHomeFailure(SmartHomeFailure.Kind.NOT_CONNECTED),
-        )
+        if (!connected) {
+            return SmartHomeResult.Failure(
+                SmartHomeFailure(SmartHomeFailure.Kind.NOT_CONNECTED),
+            )
+        }
 
-        return when (val response = api.get("/v1.0/users/$account/devices")) {
-            is TuyaResponse.Error -> SmartHomeResult.Failure(response.failure)
+        return when (val listed = fetchDevices()) {
+            is SmartHomeResult.Failure -> SmartHomeResult.Failure(listed.failure)
 
-            is TuyaResponse.Ok -> SmartHomeResult.Success(
-                response.json.optJSONArray("result").objects().map { json ->
+            is SmartHomeResult.Success -> SmartHomeResult.Success(
+                listed.value.map { json ->
                     TuyaLocalCredential(
                         deviceId = json.optString("id"),
                         name = json.optString("name").ifEmpty { "Unnamed device" },
@@ -273,15 +346,21 @@ class TuyaCloudClient(
         else -> DeviceKind.OUTLET
     }
 
-    private fun structureFor(account: String) = SmartHomeStructure(
-        id = StructureId("tuya:$account"),
-        name = "Tuya account",
-    )
-
     private fun SmartHomeFailure.named(deviceName: String) =
         if (this.deviceName == null) copy(deviceName = deviceName) else this
 
     private companion object {
+
+        /** No uid required — see [fetchDevices]. */
+        const val DEVICE_LIST_PATH = "/v1.0/iot-01/associated-users/devices"
+        const val PAGE_SIZE = 50
+        const val MAX_PAGES = 20
+
+        /** One provider, one structure. Tuya's model is an account, not a set of homes. */
+        val ACCOUNT_STRUCTURE = SmartHomeStructure(
+            id = StructureId("tuya:account"),
+            name = "Tuya account",
+        )
 
         /** Tuya's own naming. A device may expose several; the first switchable one wins. */
         val SWITCH_CODES = listOf(
