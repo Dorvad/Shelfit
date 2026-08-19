@@ -318,13 +318,18 @@ because M3 components cannot take a gradient fill — that is the only reason, s
 M3 *can* render faithfully (e.g. `OutlinedTextField`) stays stock and inherits the mapped
 colour scheme.
 
-**The shelf display** (`ui/shelf/ShelfScreen.kt`) is the decor-object mode: a dimmed
-always-on face with a thin clock, a breathing dot while listening, and a ripple moment when
-a double clap fires. Behaviours that look odd but are load-bearing:
+**The shelf display** (`ui/shelf/ShelfScreen.kt`) is the decor-object mode: an always-on
+face with a **lava field** — four palette-coloured blobs drifting on slow sine paths — a
+thin clock, a breathing dot while listening, and a ripple-plus-flare moment when a double
+clap fires. Behaviours that look odd but are load-bearing:
 
-- Window effects (keep-screen-on, brightness override to 4%, hidden system bars) are applied
+- Window effects (keep-screen-on, brightness override to 30%, hidden system bars) are applied
   in a `DisposableEffect(Unit)` with `rememberUpdatedState` — re-keying would re-capture the
   dimmed brightness as the value to restore.
+- The lava field runs on its own ~15 fps ticker, not the display clock — the motion is too
+  slow to use more frames and an always-on screen should not pay for them. The ticker stops
+  while paused: **stillness is the paused indicator.** Its time accumulator is a `Double`;
+  a `Float` visibly stutters after days of uptime.
 - The clock drifts a few dp on a minute schedule, seeded from the minute — OLED burn-in
   protection, not decoration.
 - Detection outcomes are filtered by `elapsedRealtime` against entry time, because the
